@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<!--
+  PLAYER — local audio visualizer. Double-click this file to run (file://); no server.
+  Add local audio files with the "＋ Add files" button (session-only playlist).
+
+  Files:
+    js/core.js            engine, host, player, UI, variable panel, FPS
+    js/visuals/<name>.js  one visual each; self-registers via Synesthesia.register({...})
+  Add a visual: drop a file in js/visuals/ and add one <script src> line below.
+  (Classic <script src> — NOT modules — so it still works from a file:// page.)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synesthesia Player</title>
+<style>
+  :root { color-scheme: dark; --bg:#0a0c12; --pan:#0e121c; --line:#1d2333; --ink:#dfe7f5; --dim:#8893ab; --acc:#4a6cff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui, sans-serif; overflow:hidden; }
+  #app { display:grid; grid-template-columns:1fr; grid-template-rows:1fr auto; grid-template-areas:"main" "bar"; height:100vh; }
+  #side { position:absolute; left:0; top:0; bottom:0; width:400px; z-index:6; background:var(--pan); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; min-height:0; transform:translateX(-100%); transition:transform .2s ease; }
+  #side.open { transform:translateX(0); box-shadow:12px 0 30px rgba(0,0,0,.35); }
+  #sideToggle { position:absolute; top:12px; left:12px; z-index:7; }
+  #nowplaying { position:absolute; top:12px; left:60px; z-index:5; max-width:min(44vw,400px);
+    display:none; flex-direction:column; gap:1px; padding:6px 12px; border-radius:8px;
+    background:rgba(14,18,28,.72); border:1px solid var(--line); pointer-events:none; }
+  #nowplaying.has { display:flex; }
+  #nowplaying .np-name { font-size:13px; font-weight:600; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #nowplaying .np-artist { font-size:11px; color:var(--dim); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #main { grid-area:main; position:relative; min-height:0; overflow:hidden; }
+  #vizwrap { position:absolute; inset:0; }
+  #vizwrap canvas { width:100%; height:100%; display:block; }
+  #bar { grid-area:bar; border-top:1px solid var(--line); background:var(--pan); padding:10px 14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+
+  .sidehead { padding:10px 12px 10px 56px; border-bottom:1px solid var(--line); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .addrow { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid var(--line); }
+  .addrow input { flex:1; min-width:0; }
+  ul#list { list-style:none; margin:0; padding:6px; overflow:auto; flex:1; }
+  li.track { display:flex; align-items:center; gap:8px; padding:8px 9px; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+  li.track:hover { background:#141a28; }
+  li.track.active { background:#16203c; border-color:#2a3a6a; }
+  li.track.dragover { border-color:var(--acc); }
+  .dot { width:8px; height:8px; border-radius:50%; background:#566; flex:none; }
+  .dot.ready { background:#5fd08a; } .dot.error { background:#ff7a7a; } .dot.unresolved { background:#caa44a; }
+  .tmeta { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .tname { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; }
+  .tartist { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; color:var(--dim); }
+  .tnum { color:var(--dim); font-size:12px; width:20px; text-align:right; flex:none; }
+  .x { color:var(--dim); border:none; background:none; cursor:pointer; font-size:17px; padding:4px 9px; border-radius:6px; line-height:1; }
+  .x:hover { color:#ff9a9a; background:#1a2233; }
+  #status { padding:6px 12px; font-size:12px; color:var(--dim); border-top:1px solid var(--line); }
+
+  input, select, button { background:#11151f; color:var(--ink); border:1px solid #2a3147; border-radius:8px; padding:7px 10px; font:inherit; }
+  button { cursor:pointer; } button:hover { background:#182032; }
+  button:disabled, select:disabled, input:disabled { opacity:.4; cursor:default; }
+  #desktopAudio.active { border-color:var(--acc); color:var(--acc); background:#141c34; }
+  button.icon { width:40px; text-align:center; padding:7px 0; }
+  .grp { display:flex; gap:6px; align-items:center; }
+  .grp label { color:var(--dim); font-size:12px; }
+  input[type=range] { padding:0; }
+  #seek { flex:1; min-width:120px; }
+  #time { color:var(--dim); font-variant-numeric:tabular-nums; font-size:12px; min-width:88px; text-align:center; }
+
+  /* FPS + variable panel */
+  #fps { position:absolute; top:60px; left:60px; z-index:5; background:rgba(0,0,0,.55); padding:4px 8px; border-radius:6px; font:12px monospace; color:#7ee0a8; display:none; }
+  #panelToggle { position:absolute; top:12px; right:12px; z-index:7; }
+  #panel { position:absolute; top:0; right:0; bottom:0; width:400px; background:var(--pan); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .2s ease; z-index:6; display:flex; flex-direction:column; }
+  #panel.open { transform:translateX(0); box-shadow:-12px 0 30px rgba(0,0,0,.35); }
+  .phead { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px; border-bottom:1px solid var(--line); }
+  .phead .ttl { font-weight:600; }
+  .phead .right { display:flex; align-items:center; gap:10px; }
+  .phead label { color:var(--dim); font-size:12px; display:flex; align-items:center; gap:4px; }
+  .pbar { display:flex; gap:6px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); }
+  .pbar select { flex:1; min-width:0; }
+  .pbar button { padding:6px 10px; }
+  #panelBody { padding:12px; overflow-y:auto; overflow-x:hidden; }
+  .prow { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .prow label { flex:0 0 84px; color:var(--dim); font-size:12px; }
+  .prow input[type=range] { flex:1; }
+  .prow select { flex:1; }
+  .prow .pval { width:42px; text-align:right; font-variant-numeric:tabular-nums; font-size:12px; }
+  .empty { color:var(--dim); font-size:13px; }
+
+  /* modulators — the audio→param links */
+  .prow.linked label { color:var(--acc); }
+  .prow.linked input[type=range] { opacity:.75; }
+  button.mlink { flex:none; padding:3px 7px; font-size:13px; line-height:1; color:var(--dim);
+    background:none; border:1px solid transparent; border-radius:6px; }
+  button.mlink:hover { color:var(--ink); background:#182032; }
+  button.mlink.on { color:var(--acc); border-color:#2a3a6a; background:#141c34; }
+  .modhost:empty { display:none; }
+  .modbox { margin:-6px 0 12px 14px; padding:7px 9px; border-left:2px solid #2a3a6a;
+    background:#0c1018; border-radius:0 6px 6px 0; display:flex; flex-direction:column; gap:5px; }
+  .modrow .mlab:first-child { width:42px; }
+  .modrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .modrow.op { border-top:1px dashed #1d2333; padding-top:5px; }
+  .modrow .mlab { color:var(--dim); font-size:11px; flex:none; }
+  .modrow .mlab.dim { opacity:.7; }
+  .modrow select { flex:1; min-width:0; padding:3px 6px; font-size:12px; }
+  .modrow input.mnum { width:62px; padding:3px 6px; font-size:12px; }
+  .modrow input[type=range] { flex:1; min-width:60px; }
+  .modrow .mval { width:32px; text-align:right; font-variant-numeric:tabular-nums; font-size:11px; color:var(--dim); }
+  .modrow select.maddop { flex:none; width:74px; color:var(--dim); }
+  button.mx { flex:none; padding:2px 6px; font-size:11px; color:var(--dim); background:none; border:none; }
+  button.mx:hover { color:#ff9a9a; background:#1a2233; }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="main">
+    <div id="vizwrap"></div>
+    <div id="fps">— fps</div>
+    <button id="sideToggle" title="Toggle playlist">⚙</button>
+    <div id="nowplaying"><span class="np-name"></span><span class="np-artist"></span></div>
+
+    <aside id="side" class="open">
+      <div class="sidehead">
+        <button id="addBtn">＋ Add files</button>
+      </div>
+      <ul id="list"></ul>
+      <div id="status">Ready.</div>
+    </aside>
+
+    <button id="panelToggle" title="Visual variables">⚙</button>
+    <aside id="panel">
+      <div class="phead">
+        <span class="ttl" id="panelTitle">Visual</span>
+        <span class="right">
+          <label><input type="checkbox" id="fpsToggle"> FPS</label>
+          <button id="panelClose" class="icon">✕</button>
+        </span>
+      </div>
+      <div class="pbar">
+        <button id="presetSave">Save preset</button>
+        <button id="presetFileBtn">Load preset…</button>
+      </div>
+      <div id="panelBody"></div>
+    </aside>
+  </main>
+
+  <footer id="bar">
+    <div class="grp">
+      <button id="prev" class="icon" title="Rewind to start">⏮</button>
+      <button id="play" class="icon" title="Play/Pause">▶</button>
+      <button id="stop" class="icon" title="Stop">⏹</button>
+    </div>
+    <button id="desktopAudio" title="Visualize live desktop / system audio (Chrome/Edge — pick a source and tick 'Share system/tab audio')">🖥 Desktop</button>
+    <span id="time">0:00 / 0:00</span>
+    <input id="seek" type="range" min="0" max="1000" value="0">
+    <div class="grp"><label>vol</label><input id="vol" type="range" min="0" max="100" value="75" style="width:90px"></div>
+    <div class="grp"><label>advance</label>
+      <select id="advance"><option value="auto">auto</option><option value="manual">manual</option></select>
+    </div>
+    <div class="grp"><label>gap</label><input id="gap" type="number" min="0" max="60" step="1" value="3" style="width:56px"> s</div>
+    <div class="grp"><label>order</label>
+      <select id="order"><option value="once">play once</option><option value="loop" selected>loop list</option><option value="shuffle">shuffle</option></select>
+    </div>
+    <div class="grp"><label>visual</label><select id="viz"></select></div>
+  </footer>
+</div>
+
+<audio id="audio"></audio>
+<input id="addFiles" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" multiple hidden>
+<input id="presetFile" type="file" accept="application/json,.json" hidden>
+
+<!-- core must load first (defines Synesthesia.register), then each lib, then each visual.
+     Add a visual: drop a file in js/visuals/ AND add a <script> tag to this list. -->
+<script src="js/core.js"></script>
+<script src="js/lib/audio.js"></script>
+<script src="js/lib/color.js"></script>
+<script src="js/lib/gl.js"></script>
+<script src="js/lib/expr.js"></script>
+<script src="js/lib/mod.js"></script>
+<script src="js/lib/graph.js"></script>
+<!-- VISUALS_START -->
+<script src="js/visuals/LiquidBounce.js"></script>
+<script src="js/visuals/chladni.js"></script>
+<script src="js/visuals/diagnostics.js"></script>
+<script src="js/visuals/orbitscope.js"></script>
+<script src="js/visuals/pulsar.js"></script>
+<script src="js/visuals/SpectrumIris.js"></script>
+<script src="js/visuals/dendrites.js"></script>
+<script src="js/visuals/aurora.js"></script>
+<script src="js/visuals/tesseract.js"></script>
+<script src="js/visuals/vortex.js"></script>
+<script src="js/visuals/photomolecular.js"></script>
+<!-- VISUALS_END -->
+</body>
+</html>

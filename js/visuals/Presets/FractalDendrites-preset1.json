@@ -1,0 +1,46 @@
+{
+  "visual": "dendrites",
+  "label": "Fractal Dendrites",
+  "params": {
+    "spawnRate": 0,
+    "growth": 0.02,
+    "maxDendrites": 300,
+    "maxSegs": 20000,
+    "depth": 8,
+    "angleSpread": 0.5,
+    "branchChance": 0.08,
+    "trunkLen": 0.35,
+    "trunkWidth": 1,
+    "wobble": 0.18,
+    "lenDecay": 0.8,
+    "widthDecay": 0.8,
+    "inwardSpread": 1.2,
+    "holdMs": 100,
+    "fadeMs": 522,
+    "frontGlow": 0.75,
+    "bloom": 0.7,
+    "bloomThresh": 0.35,
+    "dend_h": 200,
+    "dend_s": 0.9,
+    "dend_v": 0.85,
+    "rainbowSpan": 300,
+    "cyclers": {
+      "seq": 1,
+      "list": [
+        {
+          "id": "c1",
+          "name": "Cycler 1",
+          "mode": "sine",
+          "timing": "beat",
+          "spd": 0.1,
+          "phase": 0,
+          "src": "none",
+          "gate": 0,
+          "spring": 0,
+          "damp": 0.7,
+          "targets": []
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recorder · Synesthesia Tools</title>
+<style>
+  :root{
+    --bg:#0a0c12; --pan:#11141d; --line:#1f2433; --ink:#e7ecf5; --dim:#8a93a7;
+    --accent:#36e0c4; --accent2:#ff5d73; --good:#46d17f; --warn:#ffb454;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%, #141a2a 0%, transparent 60%), var(--bg);
+    color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.5;
+    padding:28px; display:flex; flex-direction:column; gap:20px; min-height:100%;
+  }
+  header{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
+  h1{font-size:15px; font-weight:600; letter-spacing:.02em; margin:0}
+  h1 .rec{color:var(--accent2)}
+  header .sub{color:var(--dim); font-size:12px}
+  .wrap{display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:20px; align-items:start}
+  @media (max-width:920px){ .wrap{grid-template-columns:1fr} }
+
+  .card{background:var(--pan); border:1px solid var(--line); border-radius:10px; padding:16px}
+  .card h2{font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--dim); margin:0 0 12px}
+
+  #stage{position:relative; background:#05060a; border-radius:8px; overflow:hidden; border:1px solid var(--line); aspect-ratio:16/9}
+  #stage canvas{display:block; width:100%; height:100%; object-fit:contain; image-rendering:auto}
+  #stage .placeholder{position:absolute; inset:0; display:grid; place-items:center; color:var(--dim); font-size:12px; text-align:center; padding:20px}
+  #result{margin-top:14px; display:none}
+  #result video{width:100%; border-radius:8px; border:1px solid var(--line); background:#000}
+
+  /* song drop zone */
+  #drop{border:1px dashed var(--line); border-radius:8px; padding:14px; display:flex; align-items:center; gap:12px; cursor:pointer; transition:border-color .15s, background .15s}
+  #drop:hover, #drop.over{border-color:var(--accent); background:#0e1f1c}
+  #drop .ic{font-size:20px; color:var(--accent)}
+  #drop .t{flex:1; min-width:0}
+  #drop .t .name{color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  #drop .t .meta{color:var(--dim); font-size:11px}
+
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:9px 0}
+  .row label{color:var(--dim)}
+  select,input[type=number],input[type=text]{
+    background:#0c0f17; color:var(--ink); border:1px solid var(--line); border-radius:7px;
+    padding:7px 9px; font-family:var(--mono); font-size:13px; min-width:130px;
+  }
+  input[type=number]{width:96px; min-width:0}
+  input[type=range]{flex:1; min-width:0}
+  input[type=color]{width:46px; height:30px; padding:2px; background:#0c0f17; border:1px solid var(--line); border-radius:7px}
+  .pval{color:var(--dim); width:48px; text-align:right; font-variant-numeric:tabular-nums}
+  .btn{
+    width:100%; margin-top:6px; padding:11px 14px; border-radius:8px; cursor:pointer;
+    background:var(--accent); color:#04211c; border:none; font-family:var(--mono);
+    font-weight:700; font-size:13px; letter-spacing:.02em;
+  }
+  .btn:disabled{opacity:.5; cursor:default}
+
+  /* settings panel built from the visual's params */
+  #settings{max-height:260px; overflow:auto; margin:-4px -4px 0; padding:4px}
+  #settings .prow{display:flex; align-items:center; gap:8px; margin:7px 0}
+  #settings .prow label{flex:0 0 42%; color:var(--dim); font-size:12px}
+  #settings .empty{color:var(--dim); font-size:12px}
+
+  .tele{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .tele .cell{background:var(--pan); padding:10px 12px}
+  .tele .k{color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.1em}
+  .tele .v{font-size:18px; font-variant-numeric:tabular-nums; margin-top:2px}
+  .tele .v small{font-size:11px; color:var(--dim)}
+  .heap .v{color:var(--good)}
+  .bar{height:6px; background:#0c0f17; border-radius:3px; overflow:hidden; margin-top:12px; border:1px solid var(--line)}
+  .bar > i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--accent),#5cf0d8); transition:width .12s linear}
+
+  #log{background:#070910; border:1px solid var(--line); border-radius:8px; padding:12px; height:200px; overflow:auto; white-space:pre-wrap; font-size:12px; color:#b9c2d4}
+  #log .ok{color:var(--good)} #log .err{color:var(--accent2)} #log .warn{color:var(--warn)} #log .hi{color:var(--accent)}
+  .note{color:var(--dim); font-size:11px; margin-top:10px}
+  a.dl{color:var(--accent)}
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="rec">●</span> Recorder</h1>
+    <span class="sub">Render a song through a visual to a video file — offline, faster-than-real-time, streamed to disk.</span>
+  </header>
+
+  <div class="wrap">
+    <!-- left: preview + result -->
+    <div class="card">
+      <h2>Preview</h2>
+      <div id="stage"><div class="placeholder" id="ph">pick a song &amp; visual, then Render</div></div>
+      <div id="result">
+        <h2 style="margin-top:14px">Result</h2>
+        <video id="out" controls playsinline></video>
+        <div class="row" style="margin-top:10px">
+          <span id="outinfo" class="note" style="margin:0"></span>
+          <a id="dl" class="dl" download>download</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: controls -->
+    <div style="display:flex; flex-direction:column; gap:20px">
+      <div class="card">
+        <h2>Source</h2>
+        <div id="drop">
+          <span class="ic">♪</span>
+          <div class="t"><div class="name" id="songName">Drop an audio file or click to choose</div>
+            <div class="meta" id="songMeta">mp3 · wav · m4a · ogg · flac</div></div>
+        </div>
+        <input id="file" type="file" accept="audio/*" hidden>
+
+        <div class="row" style="margin-top:14px"><label for="viz">Visual</label>
+          <select id="viz"></select>
+        </div>
+        <div class="row"><label for="res">Resolution</label>
+          <select id="res">
+            <optgroup label="Landscape · 16:9">
+              <option value="1280x720">720p · 1280×720</option>
+              <option value="1920x1080" selected>1080p · 1920×1080</option>
+              <option value="2560x1440">1440p · 2560×1440</option>
+              <option value="3840x2160">2160p · 3840×2160 (4K)</option>
+            </optgroup>
+            <optgroup label="Portrait · 9:16 (Shorts)">
+              <option value="720x1280">720p · 720×1280</option>
+              <option value="1080x1920">1080p · 1080×1920</option>
+              <option value="1440x2560">1440p · 1440×2560</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="row"><label for="fps">Frame rate</label>
+          <select id="fps"><option>30</option><option selected>60</option></select>
+        </div>
+        <div class="row"><label for="len">Length</label>
+          <select id="len"><option value="full" selected>Full song</option><option value="clip">Test clip</option></select>
+        </div>
+        <div class="row" id="clipRow" style="display:none"><label for="secs">Clip seconds</label>
+          <input id="secs" type="number" min="1" max="120" step="1" value="10">
+        </div>
+        <div class="row"><label for="quality">Quality</label>
+          <select id="quality">
+            <option value="0.08">Draft · smallest file</option>
+            <option value="0.15">Standard</option>
+            <option value="0.25" selected>High · less artifacting</option>
+            <option value="0.4">Maximum</option>
+            <option value="0.6">Ultra · heavy motion</option>
+          </select>
+        </div>
+        <div class="row"><label>Est. size</label><span id="estSize" style="color:var(--ink); font-variant-numeric:tabular-nums">—</span></div>
+        <button class="btn" id="go">Render &amp; encode</button>
+        <div class="note">Serve from the Python server and open at <b>localhost</b> so the visual scripts and codec APIs load. Output streams straight to the file you pick — memory stays flat even for long songs. The size estimate is a target-bitrate ballpark (VBR — the real file is usually a bit smaller).</div>
+      </div>
+
+      <div class="card">
+        <h2>Visual settings</h2>
+        <div id="settings"><div class="empty">Select a visual.</div></div>
+        <div class="row" style="margin-top:10px; gap:8px">
+          <button class="btn" id="savePreset" style="margin:0; flex:1">Save preset</button>
+          <button class="btn" id="loadFile" style="margin:0; flex:1">Load preset…</button>
+        </div>
+        <input id="presetFile" type="file" accept="application/json,.json" hidden>
+        <div class="note">Save downloads the current settings as a .json; Load reads one back. Tweaks here apply to the render only.</div>
+      </div>
+
+      <div class="card">
+        <h2>Telemetry</h2>
+        <div class="tele">
+          <div class="cell"><div class="k">Frames</div><div class="v" id="t_frames">0 <small>/ 0</small></div></div>
+          <div class="cell"><div class="k">Render rate</div><div class="v" id="t_rate">— <small>fps</small></div></div>
+          <div class="cell heap"><div class="k">JS heap (peak)</div><div class="v" id="t_heap">— <small>MB</small></div></div>
+          <div class="cell"><div class="k">Queue depth</div><div class="v" id="t_queue">0</div></div>
+        </div>
+        <div class="bar"><i id="t_bar"></i></div>
+      </div>
+
+      <div class="card"><h2>Log</h2><div id="log"></div></div>
+    </div>
+  </div>
+
+  <!-- register shim + libs (classic, run before the injected visual scripts) -->
+  <script>
+    window.REC = { visuals: [] };
+    window.Synesthesia = window.Synesthesia || {};
+    window.Synesthesia.register = v => window.REC.visuals.push(v);
+  </script>
+  <script src="js/lib/audio.js"></script>
+  <script src="js/lib/baker.js"></script>
+  <script src="js/lib/color.js"></script>
+  <script src="js/lib/gl.js"></script>
+  <script src="js/lib/expr.js"></script>
+  <script src="js/lib/mod.js"></script>
+  <script src="js/lib/graph.js"></script>
+  <!-- VISUALS_START -->
+<script src="js/visuals/LiquidBounce.js"></script>
+<script src="js/visuals/chladni.js"></script>
+<script src="js/visuals/diagnostics.js"></script>
+<script src="js/visuals/orbitscope.js"></script>
+<script src="js/visuals/pulsar.js"></script>
+<script src="js/visuals/SpectrumIris.js"></script>
+<script src="js/visuals/dendrites.js"></script>
+<script src="js/visuals/aurora.js"></script>
+<script src="js/visuals/tesseract.js"></script>
+<script src="js/visuals/vortex.js"></script>
+<script src="js/visuals/photomolecular.js"></script>
+  <!-- VISUALS_END -->
+
+  <!-- app (module: runs after the classic visual scripts have registered) -->
+  <script type="module">
+  const $ = id => document.getElementById(id);
+  const logEl = $("log");
+  const log = (m,c)=>{ const s=document.createElement("span"); if(c)s.className=c; s.textContent=m+"\n"; logEl.appendChild(s); logEl.scrollTop=logEl.scrollHeight; };
+  const fmtMB = b => (b/1048576).toFixed(1);
+  const yield_ = () => new Promise(r=>setTimeout(r,0));
+
+  // ---- muxers (preloaded so the Render click keeps user activation for the save dialog) ----
+  let Mp4=null, WebM=null;
+  async function loadMuxers(){
+    if(Mp4&&WebM) return;
+    log("loading muxers (mp4-muxer, webm-muxer)…");
+    [Mp4,WebM] = await Promise.all([
+      import("https://cdn.jsdelivr.net/npm/mp4-muxer@5/+esm"),
+      import("https://cdn.jsdelivr.net/npm/webm-muxer@5/+esm"),
+    ]);
+    log("muxers ready.","ok");
+  }
+
+  // ---- preflight ----
+  (function preflight(){
+    log("preflight:");
+    log("  VideoEncoder: " + ("VideoEncoder" in window ? "present":"MISSING"), ("VideoEncoder" in window)?"ok":"err");
+    log("  AudioEncoder: " + ("AudioEncoder" in window ? "present":"missing (video will have no sound)"), ("AudioEncoder" in window)?"ok":"warn");
+    log("  secure context: " + (window.isSecureContext?"yes":"no"), window.isSecureContext?"ok":"warn");
+    log("  save-to-disk: " + ("showSaveFilePicker" in window ? "available":"unavailable (will buffer in memory)"), ("showSaveFilePicker" in window)?"ok":"warn");
+    log("  heap stats: " + (performance.memory?"available":"unavailable (Chromium only)"), performance.memory?"ok":"warn");
+    log("  visuals registered: " + REC.visuals.length, REC.visuals.length?"ok":"err");
+    if(!("VideoEncoder" in window)) log("  -> this browser can't encode here. Use desktop Chrome/Edge/Chromium.","err");
+  })();
+  loadMuxers().catch(e=>log("muxer preload failed: "+e.message,"warn"));
+
+  // ---- codec pick (hardware-first; proven in recorder-test) ----
+  async function pickCodec(w,h,fps,bitrate){
+    const lvl = h<=720?"640020":h<=1080?"64002a":h<=1440?"640032":"640034";
+    const tries = [
+      {label:"H.264 / MP4 (hardware)", codec:"avc1."+lvl, container:"mp4",  mux:"avc",   hw:"prefer-hardware"},
+      {label:"H.264 / MP4 (any)",      codec:"avc1."+lvl, container:"mp4",  mux:"avc",   hw:"no-preference"},
+      {label:"VP9 / WebM (hardware)",  codec:"vp09.00.10.08", container:"webm", mux:"V_VP9", hw:"prefer-hardware"},
+      {label:"VP9 / WebM (any)",       codec:"vp09.00.10.08", container:"webm", mux:"V_VP9", hw:"no-preference"},
+      {label:"VP8 / WebM (any)",       codec:"vp8",           container:"webm", mux:"V_VP8", hw:"no-preference"},
+    ];
+    for(const t of tries){
+      const cfg = {codec:t.codec,width:w,height:h,bitrate,framerate:fps,hardwareAcceleration:t.hw,latencyMode:"quality",bitrateMode:"variable"};
+      try{
+        const r = await VideoEncoder.isConfigSupported(cfg);
+        log("  try "+t.label+" ("+t.codec+"): "+(r.supported?"supported":"no"), r.supported?"ok":"");
+        if(r.supported) return {...t, config:r.config||cfg};
+      }catch(e){ log("  try "+t.label+": "+e.message,""); }
+    }
+    return null;
+  }
+
+  // ---- audio codec pick (match the container: AAC in mp4, Opus in webm) ----
+  async function pickAudioCodec(container, numCh, sampleRate){
+    const br = numCh>2 ? 64000*numCh : 160000;
+    // Opus only speaks a fixed set of rates; 48k is the canonical one we resample to.
+    const tries = container==="mp4"
+      ? [{label:"AAC-LC", codec:"mp4a.40.2", mux:"aac",    sampleRate}]
+      : [{label:"Opus",   codec:"opus",      mux:"A_OPUS", sampleRate:48000}];
+    for(const t of tries){
+      const cfg = {codec:t.codec, numberOfChannels:numCh, sampleRate:t.sampleRate, bitrate:br};
+      try{
+        const r = await AudioEncoder.isConfigSupported(cfg);
+        log("  try audio "+t.label+" ("+t.codec+"): "+(r.supported?"supported":"no"), r.supported?"ok":"");
+        if(r.supported) return {...t, config:r.config||cfg};
+      }catch(e){ log("  try audio "+t.label+": "+e.message,""); }
+    }
+    return null;
+  }
+
+  // resample an AudioBuffer to targetSR (no-op if already there) — only the audio track
+  // needs this; the analyzer keeps using the original-rate mono PCM.
+  async function prepareAudioPCM(audioBuffer, targetSR){
+    if(!targetSR || targetSR===audioBuffer.sampleRate) return audioBuffer;
+    const oc = new OfflineAudioContext(audioBuffer.numberOfChannels,
+      Math.ceil(audioBuffer.duration*targetSR), targetSR);
+    const src = oc.createBufferSource(); src.buffer = audioBuffer;
+    src.connect(oc.destination); src.start();
+    return await oc.startRendering();
+  }
+
+  // ---- song selection ----
+  let song = null;   // { name, buffer }
+  const drop = $("drop"), fileInput = $("file");
+  drop.addEventListener("click", ()=>fileInput.click());
+  drop.addEventListener("dragover", e=>{ e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", ()=>drop.classList.remove("over"));
+  drop.addEventListener("drop", e=>{ e.preventDefault(); drop.classList.remove("over"); if(e.dataTransfer.files[0]) loadSong(e.dataTransfer.files[0]); });
+  fileInput.addEventListener("change", e=>{ if(e.target.files[0]) loadSong(e.target.files[0]); });
+  async function loadSong(file){
+    $("songName").textContent = file.name;
+    $("songMeta").textContent = "reading…";
+    try{
+      const buffer = await file.arrayBuffer();
+      song = { name:file.name, buffer, duration:0 };
+      $("songMeta").textContent = (buffer.byteLength/1048576).toFixed(1)+" MB · ready";
+      log("loaded song: "+file.name+" ("+(buffer.byteLength/1048576).toFixed(1)+" MB)","ok");
+      // grab the duration (metadata only, no decode) so the size estimate can use it
+      try{
+        const url=URL.createObjectURL(new Blob([buffer])), a=new Audio(); a.preload="metadata"; a.src=url;
+        a.addEventListener("loadedmetadata", ()=>{ if(isFinite(a.duration)&&a.duration>0){ song.duration=a.duration; } URL.revokeObjectURL(url); updateEstimate(); }, {once:true});
+        a.addEventListener("error", ()=>URL.revokeObjectURL(url), {once:true});
+      }catch(e){}
+      updateEstimate();
+    }catch(err){ $("songMeta").textContent="read failed"; log("song read failed: "+err.message,"err"); }
+  }
+
+  // ---- output size estimate: (video + audio bitrate) × duration. Mirrors the render's bitrate math. ----
+  function estimateSize(){
+    const [W,H]=$("res").value.split("x").map(Number), fps=+$("fps").value, bpp=+$("quality").value||0.25;
+    const mbps=Math.max(2, Math.round(W*H*fps*bpp/1e6));                 // same formula the encoder uses
+    const bitsPerSec=mbps*1e6 + 160000;                                  // + ~160 kbps audio
+    const dur=$("len").value==="clip" ? (+$("secs").value||0) : (song && song.duration || 0);
+    return { mbps, dur, bytes:bitsPerSec*dur/8, perMin:bitsPerSec*60/8, known:dur>0 };
+  }
+  function fmtBytes(b){ return b>=1073741824 ? (b/1073741824).toFixed(2)+" GB" : Math.max(1,Math.round(b/1048576))+" MB"; }
+  function updateEstimate(){
+    const el=$("estSize"); if(!el) return; const e=estimateSize();
+    el.textContent = e.known
+      ? "~"+fmtBytes(e.bytes)+"   ·   "+e.mbps+" Mbps · "+Math.round(e.dur)+"s"
+      : "~"+fmtBytes(e.perMin)+"/min · "+e.mbps+" Mbps  (load a song for a total)";
+  }
+  ["res","fps","len","secs","quality"].forEach(id=>{ const el=$(id); if(el){ el.addEventListener("change",updateEstimate); el.addEventListener("input",updateEstimate); } });
+  updateEstimate();
+
+  // ---- visual select + settings panel ----
+  const vizSel = $("viz");
+  REC.visuals.forEach(v=>{ const o=document.createElement("option"); o.value=v.id; o.textContent=v.label||v.id; vizSel.appendChild(o); });
+  let savedParams = {};
+  // per-visual modulators (audio→param links); seeded from whatever the player last set,
+  // overridden by a loaded preset, and applied on every rendered frame
+  let savedMods = {};
+  try{ savedParams = JSON.parse(localStorage.getItem("synesthesiaVizParams")) || {}; }catch(e){}
+  try{ savedMods   = JSON.parse(localStorage.getItem("synesthesiaVizMods"))   || {}; }catch(e){}
+  let curParams = {};   // values to render with, for the selected visual
+
+  function buildSettings(){
+    const v = REC.visuals.find(x=>x.id===vizSel.value);
+    const box = $("settings"); box.innerHTML="";
+    curParams = {};
+    if(!v || !(v.params||[]).length){ box.innerHTML='<div class="empty">No adjustable variables.</div>'; return; }
+    const saved = savedParams[v.id] || {};
+    let container = box;   // group/cyclers headers redirect content into a collapsible section
+    const collapsible = (label) => {
+      const h=document.createElement("div");
+      h.style.cssText="cursor:pointer;font-weight:600;font-size:12px;color:var(--ink);padding:8px 2px 6px;border-top:1px solid var(--line);margin-top:6px;user-select:none";
+      const sec=document.createElement("div");   // open by default; click header to collapse
+      const setLbl=()=>{ h.textContent=(sec.style.display==="none"?"▸ ":"▾ ")+label; };
+      h.addEventListener("click",()=>{ sec.style.display=sec.style.display==="none"?"":"none"; setLbl(); });
+      setLbl(); box.appendChild(h); box.appendChild(sec); return sec;
+    };
+    v.params.forEach(p=>{
+      if(p.type==="cyclers"){
+        curParams[p.key] = (saved[p.key] && saved[p.key].list) ? JSON.parse(JSON.stringify(saved[p.key])) : Synesthesia.Color.defaultCyclers();
+        const targets = v.params.filter(q=>q.type==="range").map(q=>({key:q.key,label:q.label||q.key,min:q.min,max:q.max,step:q.step}));
+        Synesthesia.Color.renderEditor(collapsible("Cyclers"), curParams[p.key], targets, ()=>{});
+        container=box; return;
+      }
+      if(p.type==="group"){ container=collapsible(p.label||""); return; }
+      curParams[p.key] = (p.key in saved) ? saved[p.key] : p.default;
+      const row=document.createElement("div"); row.className="prow";
+      const lab=document.createElement("label"); lab.textContent=p.label||p.key; row.appendChild(lab);
+      if(p.type==="range"){
+        const inp=document.createElement("input"); inp.type="range"; inp.min=p.min; inp.max=p.max; inp.step=p.step||1; inp.value=curParams[p.key];
+        const val=document.createElement("span"); val.className="pval"; val.textContent=curParams[p.key];
+        inp.addEventListener("input",e=>{ curParams[p.key]=+e.target.value; val.textContent=e.target.value; });
+        row.appendChild(inp); row.appendChild(val);
+      } else if(p.type==="select"){
+        const inp=document.createElement("select");
+        p.options.forEach(o=>{ const op=document.createElement("option"); op.value=op.textContent=o; if(o===curParams[p.key])op.selected=true; inp.appendChild(op); });
+        inp.addEventListener("change",e=>curParams[p.key]=e.target.value);
+        row.appendChild(inp);
+      } else if(p.type==="checkbox"){
+        const inp=document.createElement("input"); inp.type="checkbox"; inp.checked=!!curParams[p.key];
+        inp.addEventListener("change",e=>curParams[p.key]=e.target.checked);
+        row.appendChild(inp);
+      } else if(p.type==="color"){
+        const inp=document.createElement("input"); inp.type="color"; inp.value=curParams[p.key];
+        inp.addEventListener("input",e=>curParams[p.key]=e.target.value);
+        row.appendChild(inp);
+      }
+      container.appendChild(row);
+    });
+  }
+  vizSel.addEventListener("change", buildSettings);
+  if(REC.visuals.length) buildSettings();
+
+  // ---- visual presets: Save downloads a .json; Load reads one via the file picker.
+  //      Same {visual,label,params} format as the player, so presets interchange. ----
+  function presetStem(){
+    const v = REC.visuals.find(x=>x.id===vizSel.value);
+    return v ? (v.label||v.id).replace(/[^\w.-]+/g,"") + "-preset" : "preset";   // e.g. "Vortex-preset"
+  }
+  function saveSettings(){
+    const v = REC.visuals.find(x=>x.id===vizSel.value);
+    if(!v){ log("select a visual first.","err"); return; }
+    const name = prompt("Save preset as:", presetStem());
+    if(name===null) return;
+    const fn = (/\.json$/i.test(name)?name:name+".json");
+    const data = JSON.stringify({ visual:v.id, label:v.label||v.id, params:curParams,
+                                 mods:(savedMods[v.id]||{}) }, null, 2);
+    const blob=new Blob([data],{type:"application/json"}), url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=fn; a.click(); URL.revokeObjectURL(url);
+    log("downloaded "+fn,"ok");
+  }
+  function applyPreset(text, srcName){
+    try{
+      const o=JSON.parse(text);
+      const params = o && o.params ? o.params : (o && typeof o==="object" && !Array.isArray(o) ? o : null);
+      if(!params) throw 0;
+      if(o.visual && REC.visuals.some(v=>v.id===o.visual)) vizSel.value=o.visual;   // switch to the preset's visual
+      const v=REC.visuals.find(x=>x.id===vizSel.value);
+      if(!v){ log("preset's visual isn't available here.","err"); return; }
+      savedParams[v.id]=Object.assign({}, savedParams[v.id], params);   // buildSettings reads from here
+      savedMods[v.id]=(o && o.mods) || {};   // audio→param links travel with the preset
+      buildSettings();
+      log("loaded preset for "+(v.label||v.id)+" ("+srcName+")","ok");
+    }catch(err){ log("load failed — not a valid preset JSON.","err"); }
+  }
+  $("savePreset").addEventListener("click", saveSettings);
+  $("loadFile").addEventListener("click", ()=>$("presetFile").click());
+  $("presetFile").addEventListener("change", e=>{ const f=e.target.files[0]; if(f){ const rd=new FileReader(); rd.onload=()=>applyPreset(rd.result, f.name); rd.readAsText(f); } e.target.value=""; });
+
+  // length toggle
+  $("len").addEventListener("change", e=>{ $("clipRow").style.display = e.target.value==="clip" ? "flex" : "none"; });
+
+  // keep the preview box matching the chosen aspect (so 9:16 isn't letterboxed in a 16:9 box)
+  const stageEl = $("stage");
+  function syncStageAspect(){ const [w,h]=$("res").value.split("x").map(Number); stageEl.style.aspectRatio = w+" / "+h; }
+  $("res").addEventListener("change", syncStageAspect); syncStageAspect();
+
+  // ---- the render pipeline ----
+  let busy=false;
+  $("go").addEventListener("click", run);
+  async function run(){
+    if(busy) return;
+    if(!song){ log("pick a song first.","err"); return; }
+    if(!REC.visuals.length){ log("no visuals registered — is the server injecting them?","err"); return; }
+    busy=true; $("go").disabled=true; $("result").style.display="none"; $("ph").style.display="none";
+
+    let encoder=null, audioEncoder=null, writable=null, viz=null, canvas=null;
+    const realPN=performance.now.bind(performance), realDN=Date.now;
+    let shimmed=false;
+    try{
+      const [W,H]=$("res").value.split("x").map(Number);
+      const fps=+$("fps").value;
+      const bpp=+$("quality").value||0.25, mbps=Math.max(2, Math.round(W*H*fps*bpp/1e6));
+      const bitrate=Math.round(mbps*1e6);
+
+      log("");
+      log("render "+W+"×"+H+" @ "+fps+"fps · "+mbps+" Mbps","hi");
+      await loadMuxers();
+      const pick=await pickCodec(W,H,fps,bitrate);
+      if(!pick){ throw new Error("no supported encoder configuration on this box"); }
+      log("using: "+pick.label+"  ("+pick.codec+")","ok");
+
+      const ext = pick.container==="mp4"?"mp4":"webm";
+      const mime = pick.container==="mp4"?"video/mp4":"video/webm";
+      const base = song.name.replace(/\.[^.]+$/,"") + "_" + (viz&&viz.id||vizSel.value) + "_" + H + "p" + fps;
+
+      // output target: stream to a chosen file, else buffer in memory + download
+      let target=null, toDisk=false, writeChain=Promise.resolve();
+      if(window.showSaveFilePicker){
+        try{
+          const handle=await window.showSaveFilePicker({ suggestedName: base+"."+ext,
+            types:[{description:ext.toUpperCase()+" video", accept:{[mime]:["."+ext]}}] });
+          writable=await handle.createWritable();
+          const onData=(data,position)=>{ const buf=data.slice(); writeChain=writeChain.then(()=>writable.write({type:"write",position,data:buf})); };
+          target = pick.container==="mp4" ? new Mp4.StreamTarget({onData,chunked:true}) : new WebM.StreamTarget({onData,chunked:true});
+          toDisk=true; log("streaming to disk: "+handle.name,"ok");
+        }catch(e){ if(e&&e.name==="AbortError"){ log("cancelled.","warn"); return; }
+          log("save dialog unavailable — buffering in memory: "+e.message,"warn"); }
+      }
+      if(!target) target = pick.container==="mp4" ? new Mp4.ArrayBufferTarget() : new WebM.ArrayBufferTarget();
+
+      // decode the song -> AudioBuffer (drives both the analyzer and the muxed audio track)
+      log("decoding audio…");
+      const audioBuffer = await Synesthesia.Baker.decode(song.buffer);
+      const pcm = Synesthesia.Baker.toMono(audioBuffer);   // mono, for the analyzer only
+      const sr = audioBuffer.sampleRate;
+      log("decoded: "+audioBuffer.duration.toFixed(1)+"s · "+sr+" Hz · "+audioBuffer.numberOfChannels+"ch","ok");
+
+      // pick an audio codec for this container and prep PCM at a rate it accepts
+      let audioOK=false, apick=null, encBuf=null, encSR=0, numCh=audioBuffer.numberOfChannels;
+      if("AudioEncoder" in window){
+        apick = await pickAudioCodec(pick.container, numCh, sr);
+        if(apick){
+          encBuf = await prepareAudioPCM(audioBuffer, apick.sampleRate);
+          encSR = encBuf.sampleRate;
+          audioOK = true;
+          log("audio: "+apick.label+" · "+numCh+"ch · "+encSR+" Hz"+(encSR!==sr?" (resampled)":""),"ok");
+        } else log("no supported audio codec for "+pick.container+" — rendering video only.","warn");
+      } else log("AudioEncoder missing — rendering video only.","warn");
+
+      const audioCfg = audioOK ? {codec:apick.mux, numberOfChannels:numCh, sampleRate:encSR} : null;
+      const muxer = pick.container==="mp4"
+        ? new Mp4.Muxer({ target, video:{codec:pick.mux,width:W,height:H}, ...(audioCfg?{audio:audioCfg}:{}), fastStart: toDisk?false:"in-memory" })
+        : new WebM.Muxer({ target, video:{codec:pick.mux,width:W,height:H,frameRate:fps}, ...(audioCfg?{audio:audioCfg}:{}) });
+
+      const fullFrames = Math.floor(audioBuffer.duration*fps);
+      const total = $("len").value==="clip"
+        ? Math.min(fullFrames, Math.round((+$("secs").value||10)*fps)) : fullFrames;
+      log("frames to render: "+total+" ("+(total/fps).toFixed(1)+"s)","hi");
+
+      const bake = Synesthesia.Baker.create(pcm, sr, {fps});
+      const aState = Synesthesia.Audio.createState();
+
+      // mount the visual on a fresh canvas at full render resolution (also the live preview)
+      canvas=document.createElement("canvas"); canvas.width=W; canvas.height=H;
+      const stage=$("stage"); stage.querySelectorAll("canvas").forEach(c=>c.remove()); stage.appendChild(canvas);
+      viz = REC.visuals.find(v=>v.id===vizSel.value);
+      viz.p = {...curParams};
+      Synesthesia.Mod.hydrate(viz, savedMods[viz.id]);   // audio→param links from the preset
+      viz.mount({canvas, dpr:1});
+      if(viz.resize) viz.resize(W,H);
+
+      encoder=new VideoEncoder({ output:(c,m)=>muxer.addVideoChunk(c,m), error:e=>log("encoder error: "+e.message,"err") });
+      encoder.configure(pick.config);
+
+      if(audioOK){
+        audioEncoder=new AudioEncoder({ output:(c,m)=>muxer.addAudioChunk(c,m), error:e=>log("audio encoder error: "+e.message,"err") });
+        audioEncoder.configure(apick.config);
+      }
+      // per-channel views + reusable planar scratch, so we can hand the encoder one
+      // video-frame's worth of audio each iteration (keeps A/V interleaved for streaming mux)
+      const chData = audioOK ? Array.from({length:numCh},(_,c)=>encBuf.getChannelData(c)) : null;
+      const aLen   = audioOK ? chData[0].length : 0;
+      const planar = audioOK ? new Float32Array((Math.ceil(encSR/fps)+2)*numCh) : null;
+
+      const frameDur=Math.round(1e6/fps), keyInt=fps*2, dtMs=1000/fps;
+      let peakHeap=0; const t0=realPN();
+
+      // time shim: visuals that read performance.now()/Date.now() advance with the render,
+      // not wall-clock, so motion stays locked to the audio. Telemetry uses realPN().
+      let simClock=0;
+      performance.now = ()=>simClock; Date.now = ()=>simClock; shimmed=true;
+
+      for(let f=0; f<total; f++){
+        simClock = f*dtMs;
+        const raw = Synesthesia.Baker.rawAt(bake, f);
+        const wave = Synesthesia.Baker.waveAt(bake, f);
+        const a = Synesthesia.Audio.analyze(raw, aState, simClock, dtMs, wave);
+        Synesthesia.Mod.apply(viz, a, dtMs/1000);   // audio→param links, same as the player
+        viz.frame(a);
+
+        const frame=new VideoFrame(canvas, {timestamp:f*frameDur, duration:frameDur});
+        encoder.encode(frame, {keyFrame:(f%keyInt)===0});
+        frame.close();
+
+        if(audioOK){
+          const sStart=Math.round(f*encSR/fps), sEnd=Math.min(aLen, Math.round((f+1)*encSR/fps)), n=sEnd-sStart;
+          if(n>0){
+            for(let c=0;c<numCh;c++) planar.set(chData[c].subarray(sStart,sEnd), c*n);   // planar: [ch0…][ch1…]
+            const ad=new AudioData({ format:"f32-planar", sampleRate:encSR, numberOfFrames:n,
+              numberOfChannels:numCh, timestamp:Math.round(sStart/encSR*1e6), data:planar.subarray(0,n*numCh) });
+            audioEncoder.encode(ad); ad.close();
+          }
+        }
+
+        while(encoder.encodeQueueSize>8 || (audioEncoder&&audioEncoder.encodeQueueSize>16)) await new Promise(r=>setTimeout(r,1));
+
+        if(f%6===0 || f===total-1){
+          const el=(realPN()-t0)/1000, rate=el>0?(f+1)/el:0;
+          if(performance.memory) peakHeap=Math.max(peakHeap, performance.memory.usedJSHeapSize);
+          $("t_frames").innerHTML=(f+1)+' <small>/ '+total+'</small>';
+          $("t_rate").innerHTML=rate.toFixed(0)+' <small>fps</small>';
+          $("t_queue").textContent=encoder.encodeQueueSize;
+          $("t_heap").innerHTML=performance.memory?fmtMB(peakHeap)+' <small>MB</small>':'n/a';
+          $("t_bar").style.width=((f+1)/total*100).toFixed(1)+"%";
+          await yield_();   // paint preview + drain encoder output callbacks
+        }
+      }
+
+      performance.now=realPN; Date.now=realDN; shimmed=false;
+      log("flushing encoders…");
+      await encoder.flush(); encoder.close(); encoder=null;
+      if(audioEncoder){ await audioEncoder.flush(); audioEncoder.close(); audioEncoder=null; }
+      muxer.finalize();
+
+      const el=(realPN()-t0)/1000;
+      if(toDisk){
+        await writeChain; await writable.close(); writable=null;
+        log("done: "+total+" frames in "+el.toFixed(1)+"s ("+(total/el).toFixed(0)+" fps) — streamed to disk.","ok");
+        if(performance.memory) log("peak JS heap: "+fmtMB(peakHeap)+" MB (raw frames would be "+fmtMB(W*H*4*total)+" MB).","hi");
+        $("outinfo").textContent=W+"×"+H+" · "+fps+"fps · "+pick.label+(audioOK?" + "+apick.label:" · no audio")+" · saved to disk";
+      } else {
+        const blob=new Blob([target.buffer],{type:mime}), url=URL.createObjectURL(blob);
+        log("done: "+total+" frames in "+el.toFixed(1)+"s ("+(total/el).toFixed(0)+" fps) · "+fmtMB(target.buffer.byteLength)+" MB","ok");
+        const out=$("out"); out.src=url; const dl=$("dl"); dl.href=url; dl.download=base+"."+ext;
+        $("outinfo").textContent=W+"×"+H+" · "+fps+"fps · "+fmtMB(target.buffer.byteLength)+" MB · "+pick.label+(audioOK?" + "+apick.label:" · no audio");
+        $("result").style.display="block";
+      }
+
+      if(viz&&viz.unmount){ try{ viz.unmount(); }catch(_){} }
+
+    }catch(err){
+      console.error(err);
+      log("FAILED: "+(err&&err.message?err.message:err),"err");
+      if(encoder){ try{ encoder.close(); }catch(_){} }
+      if(audioEncoder){ try{ audioEncoder.close(); }catch(_){} }
+      if(writable){ try{ await writable.close(); }catch(_){} }
+    }finally{
+      if(shimmed){ performance.now=realPN; Date.now=realDN; }
+      busy=false; $("go").disabled=false;
+    }
+  }
+  </script>
+</body>
+</html>
