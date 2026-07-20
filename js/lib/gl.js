@@ -226,7 +226,10 @@
 
   /* ------------------------------- Scene -------------------------------- */
   const STRIDE = 8;          // floats per instance, both line and sprite layouts
-  const MAXLINES = 16384;   // a single dendrite tree is thousands of capsules
+  // Per-batch line cap. A single dendrite tree is thousands of capsules and a screenful of them
+  // ran past 16k (segments were silently dropped — newest trees lost their growth fronts).
+  // Instanced at STRIDE floats each, so this buffer is ~2MB; the sprite buffers dwarf it.
+  const MAXLINES = 65536;
   const MAXSPRITE = 3000000;  // per-batch sprite cap; buffers below pre-allocate to this
 
   function Scene(canvas, dpr) {
@@ -556,5 +559,6 @@
   GL.createScene = function (canvas, dpr) { return new Scene(canvas, dpr); };
   GL.Scene = Scene;
 
+  GL.MAXLINES = MAXLINES;   // producers (e.g. the graph `lines` node) cap against this, not a copy
   (window.Synesthesia = window.Synesthesia || {}).GL = GL;
 })();

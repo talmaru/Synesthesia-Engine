@@ -18,8 +18,8 @@
    A node: { id, type, in:{port:<ref>}, cfg:{…} }.  A <ref> is one of:
      "nodeId"  "nodeId:port"  "nodeId[i]"  {param:"k"}  {const:v}  {audio:"f"}  number
 
-   Wire payloads: pointset {kind,points:[{x,y,…}]}, segments {kind,flat:[…],n},
-   or a plain scalar/point. Renderers draw into the shared GL scene and return null.
+   Wire payloads: pointset {kind,points:[{x,y,…}]}, or a plain scalar/point.
+   Renderers draw into the shared GL scene and return null.
    ========================================================================== */
 
 (function () {
@@ -27,7 +27,6 @@
   const Color = S.Color, Expr = S.Expr, GL = S.GL;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const WHITE = [1, 1, 1];
-  const SEGF = 7;   // floats per segment in a `segments` payload: x1,y1,x2,y2,alpha,hueOff(deg),widthMul
 
   // full-screen vertex shader for `shader` nodes (matches the Scene's fullscreen triangle);
   // fragment shaders declare `in vec2 vUV` + any of the built-in uniforms below.
@@ -78,71 +77,6 @@
     if (dy > 1e-6) t = Math.min(t, (H - y) / dy); else if (dy < -1e-6) t = Math.min(t, -y / dy);
     return isFinite(t) && t > 0 ? t : Math.max(W, H);
   }
-  // midpoint-displacement fractal path -> flat [x,y,x,y,…], using a SEEDED rng
-  function fractal(rng, x0, y0, x1, y1, detail, rough) {
-    let pts = [x0, y0, x1, y1];
-    for (let d = 0; d < detail; d++) {
-      const np = [];
-      for (let i = 0; i < pts.length - 2; i += 2) {
-        const ax = pts[i], ay = pts[i + 1], bx = pts[i + 2], by = pts[i + 3];
-        const ddx = bx - ax, ddy = by - ay, len = Math.hypot(ddx, ddy) || 1;
-        const disp = (rng() - 0.5) * len * rough;
-        np.push(ax, ay, (ax + bx) / 2 - ddy / len * disp, (ay + by) / 2 + ddx / len * disp);
-      }
-      np.push(pts[pts.length - 2], pts[pts.length - 1]);
-      pts = np;
-    }
-    return pts;
-  }
-  // one forked bolt, centre-relative: [ax,ay,bx,by,fa,fb] (f = outward fraction 0..1)
-  function buildBolt(rng, ux, uy, reach, detail, rough, branch) {
-    const out = [], invReach = reach > 0 ? 1 / reach : 0;
-    const push = pts => {
-      for (let i = 0; i < pts.length - 2; i += 2) {
-        const ax = pts[i], ay = pts[i + 1], bx = pts[i + 2], by = pts[i + 3];
-        out.push(ax, ay, bx, by,
-          clamp((ax * ux + ay * uy) * invReach, 0, 1),
-          clamp((bx * ux + by * uy) * invReach, 0, 1));
-      }
-    };
-    const trunk = fractal(rng, 0, 0, ux * reach, uy * reach, detail, rough);
-    push(trunk);
-    const nT = trunk.length / 2, tAng = Math.atan2(uy, ux);
-    for (let b = 0; b < branch; b++) {
-      const jv = 1 + ((rng() * (nT - 2)) | 0);
-      const sx = trunk[jv * 2], sy = trunk[jv * 2 + 1];
-      const bAng = tAng + (rng() - 0.5) * 1.4;
-      const bux = Math.cos(bAng), buy = Math.sin(bAng);
-      const along = sx * ux + sy * uy;
-      const blen = (reach - along) * (0.3 + rng() * 0.4);
-      if (blen < reach * 0.1) continue;
-      push(fractal(rng, sx, sy, sx + bux * blen, sy + buy * blen, Math.max(1, detail - 1), rough));
-    }
-    return out;
-  }
-  // one dendrite tree, centre-relative: flat [ax,ay,bx,by,fa,fb] where f = arc-length fraction
-  // 0..1 from the root (so a growth front can reveal it root→tip). Recursive forward-walk with
-  // per-step angular wobble and probabilistic side branches (len decays by `decay` each level).
-  function buildBranch(rng, ux, uy, reach, depth, wobble, chance, spread, decay) {
-    const segs = [], step = reach / Math.max(6, depth * 5);
-    let maxArc = 1e-3, count = 0;
-    const grow = (x, y, ang, len, dep, arc) => {
-      if (dep <= 0 || len < step || count > 3000) return;
-      const steps = Math.max(2, Math.floor(len / step));
-      let cx = x, cy = y, a = ang, d = arc;
-      for (let i = 0; i < steps && count <= 3000; i++) {
-        a += (rng() - 0.5) * wobble;
-        const nx = cx + Math.cos(a) * step, ny = cy + Math.sin(a) * step, d2 = d + step;
-        segs.push(cx, cy, nx, ny, d, d2); count++;
-        if (d2 > maxArc) maxArc = d2;
-        cx = nx; cy = ny; d = d2;
-        if (dep > 1 && rng() < chance) grow(cx, cy, a + (rng() < 0.5 ? 1 : -1) * spread * (0.6 + rng() * 0.7), len * decay, dep - 1, d);
-      }
-    };
-    grow(0, 0, Math.atan2(uy, ux), reach, depth, 0);
-    for (let i = 4; i < segs.length; i += 6) { segs[i] /= maxArc; segs[i + 1] /= maxArc; }   // arc → 0..1
-    return segs;
-  }
 
   /* --------------------- curl-noise flow field (turbulence) ------------- */
   const FRES = 64, VMAX = 3000;   // flow-grid resolution; velocity step clamp (device-px/s)
@@ -179,20 +113,6 @@
   /* ------------------------------ node catalog -------------------------- */
   // Each entry: eval(node, ctx) -> output. Stateful nodes stash under ctx.state[id].
   const NODES = {
-    // GENERATOR: N points on a ring, 360/N apart; phase integrates `spin`.
-    orbit(node, ctx) {
-      const st = ctx.state[node.id] || (ctx.state[node.id] = { phase: 0 });
-      st.phase += num(node, "spin", ctx, 0) * ctx.dt;
-      const count = (node.cfg && node.cfg.count) || 2;
-      const dist = ctx.minDim * num(node, "radius", ctx, 0.18);
-      const o = originXY(node, ctx), cx = o[0], cy = o[1], points = [];
-      for (let k = 0; k < count; k++) {
-        const ang = st.phase + k * (Math.PI * 2 / count);
-        const nx = Math.cos(ang), ny = Math.sin(ang);
-        points.push({ x: cx + nx * dist, y: cy + ny * dist, nx, ny, ang, idx: k });
-      }
-      return { kind: "pointset", points };
-    },
 
     // RENDERER: soft additive sprites. Per-point rgb/size/life are honored when present
     // (baked particles: colour from rgb, size from size, alpha faded by life/life0); else
@@ -216,26 +136,6 @@
       } };
     },
 
-    // GEOMETRY: waveform strip between two anchor points, displaced by a signal.
-    waveTrace(node, ctx) {
-      const a = resolveRef(inRef(node, "a"), ctx), b = resolveRef(inRef(node, "b"), ctx);
-      const sig = resolveRef(inRef(node, "signal"), ctx);
-      if (!a || !b || !sig || !sig.length) return { kind: "segments", flat: [], n: 0 };
-      const dab = Math.hypot(b.x - a.x, b.y - a.y);
-      const amp = num(node, "amp", ctx, 0.2) * dab, jitter = num(node, "jitter", ctx, 0);
-      const dx = (b.x - a.x), dy = (b.y - a.y), L = Math.hypot(dx, dy) || 1;
-      const px = -dy / L, py = dx / L;                    // unit perpendicular
-      const rng = ctx.rngFor(node.id, ctx.frame);         // per-frame seeded jitter
-      const M = sig.length, flat = []; let n = 0, prevx = 0, prevy = 0;
-      for (let i = 0; i < M; i++) {
-        const t = i / (M - 1), env = Math.sin(Math.PI * t);
-        const off = (sig[i] + (rng() - 0.5) * jitter) * amp * env;
-        const x = a.x + dx * t + px * off, y = a.y + dy * t + py * off;
-        if (i > 0) { flat.push(prevx, prevy, x, y, 1, 0, 1); n++; }
-        prevx = x; prevy = y;
-      }
-      return { kind: "segments", flat, n };
-    },
 
     // SOURCE (emitter): on a trigger, spawn particles. Modes: no anchors → one free burst;
     // anchors (default "each") → one burst of `count` per anchor; anchors + cfg.anchorMode
@@ -246,7 +146,39 @@
     emitter(node, ctx) {
       const st = ctx.state[node.id] || (ctx.state[node.id] = { pool: [], pid: 0, burst: 0, acc: 0, _cum: null });
       const pool = st.pool, cfg = node.cfg || {}, trig = cfg.trigger || "beat", C = ctx.compiled[node.id] || {};
-      for (let i = pool.length - 1; i >= 0; i--) { const q = pool[i]; q.life -= ctx.dt; if (q.life <= 0) { pool[i] = pool[pool.length - 1]; pool.pop(); } }
+      // `age` is counted UP independently of `life`, because retiring rewrites life (see the
+      // population cap below) — deriving age from life0-life would make a retired particle
+      // appear ancient the instant it's retired.
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const q = pool[i]; q.life -= ctx.dt; q.age += ctx.dt;
+        if (q.life <= 0) { pool[i] = pool[pool.length - 1]; pool.pop(); }
+      }
+
+      // RETIREMENT: a particle is given `retire` seconds to live and stamped `q.retiring`, so a
+      // consumer can fade it out instead of it popping. Two things trigger it:
+      //   (a) a consumer stamping `q.done` (nothing in the current catalog does — this path is
+      //       kept because it is the general "a consumer decided this particle is finished" hook);
+      //   (b) the population cap below.
+      const retire = Math.max(num(node, "retire", ctx, 1.5), 0.05);
+      const retireQ = q => { if (q.retiring) return; q.retiring = retire; if (q.life > retire) q.life = retire; };
+      for (let i = 0; i < pool.length; i++) if (pool[i].done) retireQ(pool[i]);
+
+      // POPULATION CAP (`max`): density as a headcount rather than a lifespan. Over the cap the
+      // OLDEST live particles (lowest pid) retire early. Already-retiring ones don't count.
+      const maxN = Math.round(num(node, "max", ctx, 0));
+      if (maxN > 0) {
+        let live = 0;
+        for (let i = 0; i < pool.length; i++) if (!pool[i].retiring) live++;
+        while (live > maxN) {
+          let oldest = -1;
+          for (let i = 0; i < pool.length; i++)
+            if (!pool[i].retiring && (oldest < 0 || pool[i].pid < pool[oldest].pid)) oldest = i;
+          if (oldest < 0) break;
+          retireQ(pool[oldest]);
+          live--;
+        }
+      }
+
       let bursts = 0;
       if (trig === "beat") { const gate = num(node, "gate", ctx, 0); if (ctx.a.beat && (ctx.a[cfg.gateSrc || "energy"] || 0) > gate) bursts = 1; }
       else if (trig === "rate") { st.acc += num(node, "rate", ctx, 0) * ctx.dt; bursts = Math.floor(st.acc); st.acc -= bursts; }
@@ -277,7 +209,7 @@
           size: data.size != null ? data.size : (bvars && bvars.size != null ? bvars.size : 1),
           op: data.op != null ? data.op : 1,
           rgb: data.h != null ? Color.hsv(data.h, data.s != null ? data.s : 1, data.v != null ? data.v : 1) : null,
-          anchorIdx: ai, pid: st.pid++, data, life: life0, life0,
+          anchorIdx: ai, pid: st.pid++, data, life: life0, life0, age: 0,
         });
       };
 
@@ -589,67 +521,7 @@
       return { kind: "layer", draw(scene) { scene.heightFloor(colH, cols, maxH, top, bot); scene.lines(buf, nSeg, { target: "screen", blend: "add" }); } };
     },
 
-    // GEOMETRY: fractal geometry per particle. Bakes the shape ONCE (D1: store), then each frame
-    // re-pins the base to the (moving) anchor. shape "bolt" = midpoint-displacement lightning,
-    // revealed by tip-drift (travel*(1-life)); shape "branch" = dendrite tree, revealed root→tip
-    // by a growth front that advances as the particle ages, with a bright tip and end-of-life fade.
-    fractal(node, ctx) {
-      const pool = resolveRef(inRef(node, "pool"), ctx);
-      const anchors = resolveRef(inRef(node, "anchors"), ctx);
-      if (!pool || !pool.points) return { kind: "segments", flat: [], n: 0 };
-      const shape = (node.cfg && node.cfg.shape) || "bolt";
-      const detail = Math.round(num(node, "detail", ctx, 4)), rough = num(node, "rough", ctx, 0.4);
-      const branch = num(node, "branch", ctx, 2), travel = num(node, "travel", ctx, 0.4);
-      const spread = num(node, "spread", ctx, 0.5), decay = clamp(num(node, "decay", ctx, 0.8), 0.5, 0.98);
-      const rainbow = num(node, "rainbow", ctx, 0), taper = clamp(num(node, "taper", ctx, 0), 0, 1);
-      const flat = []; let n = 0;
-      for (const q of pool.points) {
-        const dd = q.data || {}, ux = dd.ux || 0, uy = dd.uy || 0, reach = dd.reach || 0;
-        if (!q._bolt) q._bolt = shape === "branch"
-          ? buildBranch(ctx.rngFor(node.id, q.pid), ux, uy, reach, detail, rough, clamp(branch * 0.06, 0.02, 0.6), spread, decay)
-          : buildBolt(ctx.rngFor(node.id, q.pid), ux, uy, reach, detail, rough, Math.round(branch));
-        const s = q._bolt, life = q.life0 > 0 ? q.life / q.life0 : 0;
-        const anc = anchors && anchors.points ? anchors.points[q.anchorIdx] : q;
-        const cx = anc ? anc.x : q.x, cy = anc ? anc.y : q.y;
-        if (shape === "branch") {
-          const grown = clamp((1 - life) / 0.5, 0, 1), fade = clamp(life / 0.4, 0, 1);   // grow over first half, fade over last 40%
-          for (let i = 0; i + 5 < s.length; i += 6) {
-            if (s[i + 4] > grown) continue;                                  // segment not yet reached by the front
-            const fmid = (s[i + 4] + s[i + 5]) * 0.5;                        // arc fraction 0(root)..1(tip)
-            const front = clamp(1 - (grown - s[i + 5]) / 0.18, 0, 1);        // brighten just behind the front (tip glow)
-            flat.push(cx + s[i], cy + s[i + 1], cx + s[i + 2], cy + s[i + 3],
-                      clamp(fade * (0.65 + front * 0.6), 0, 1), rainbow * fmid, Math.max(0.15, 1 - taper * fmid)); n++;
-          }
-        } else {
-          const tr = (1 - life) * travel * reach;
-          for (let i = 0; i + 5 < s.length; i += 6) {
-            flat.push(cx + s[i] + ux * tr * s[i + 4], cy + s[i + 1] + uy * tr * s[i + 4],
-                      cx + s[i + 2] + ux * tr * s[i + 5], cy + s[i + 3] + uy * tr * s[i + 5], life, 0, 1); n++;
-          }
-        }
-      }
-      return { kind: "segments", flat, n };
-    },
 
-    // RENDERER: additive rounded capsules; per-segment alpha fades the colour.
-    lines(node, ctx) {
-      const segs = resolveRef(inRef(node, "segs"), ctx);
-      if (!segs || !segs.n) return null;
-      const baseH = num(node, "h", ctx, 0), sat = num(node, "s", ctx, 1), val = num(node, "v", ctx, 1);
-      const rgb0 = Color.hsv(baseH, sat, val);
-      const hw = num(node, "width", ctx, 2) * ctx.dpr;
-      const st = ctx.state[node.id] || (ctx.state[node.id] = { buf: new Float32Array(0) });
-      const cap = Math.min(segs.n, 16384);   // matches gl.js MAXLINES; a dendrite tree is thousands of segs
-      if (st.buf.length < cap * 8) st.buf = new Float32Array(cap * 8);
-      const buf = st.buf, f = segs.flat;
-      for (let i = 0; i < cap; i++) {
-        const s = i * SEGF, o = i * 8, a = f[s + 4], hueOff = f[s + 5], wmul = f[s + 6];
-        const rgb = hueOff ? Color.hsv(baseH + hueOff, sat, val) : rgb0;   // per-segment rainbow when set
-        buf[o] = f[s]; buf[o + 1] = f[s + 1]; buf[o + 2] = f[s + 2]; buf[o + 3] = f[s + 3];
-        buf[o + 4] = hw * wmul; buf[o + 5] = rgb[0] * a; buf[o + 6] = rgb[1] * a; buf[o + 7] = rgb[2] * a;
-      }
-      return { kind: "layer", draw(scene, target, blend) { scene.lines(buf, cap, { target, blend }); } };
-    },
 
     // RENDERER: a user fragment shader as a full-screen layer. Compiles once (recompiles when the
     // source changes), caches uniform locations, uploads the spectrum LUT, and reads its custom
@@ -824,22 +696,17 @@
   // Machine-readable description of every catalog node for the editor: category, output
   // kind, input ports (name + kind + optional flag), and cfg fields. Wire kinds:
   //   points   = a pointset/pool output (generators, emitter, forces, integrators)
-  //   point    = a single indexed point (e.g. "orbit[0]") — for waveTrace a/b
-  //   segments = line segments (geometry) → the `lines` renderer
+  //   point    = a single indexed point (e.g. "someNode[0]")
   //   signal   = an audio array ({audio:"wave"|"bins"})
   //   scalar   = a number: {param}/{const}/{audio:<band>} or a node… (none emit scalars yet)
-  // A port with kind "points"/"point"/"segments"/"signal" connects to a node/ref of that
+  // A port with kind "points"/"point"/"signal" connects to a node/ref of that
   // kind; "scalar" ports take param/const/audio literals (the panel already edits those).
   const P = (name, kind, opt) => ({ name, kind, opt: !!opt });
   const MANIFEST = {
-    orbit:       { cat: "generator", out: "points", desc: "N points on a ring; phase integrates spin",
-                   ports: [P("spin", "scalar"), P("radius", "scalar"), P("origin", "point", true)], cfg: [{ name: "count", type: "number", default: 2 }] },
-    spectrumBars:{ cat: "generator", out: "points", desc: "One point per FFT bin (bar geometry + loudness + colour)",
-                   ports: [P("gain", "scalar"), P("inner", "scalar"), P("spin", "scalar"), P("hueSpread", "scalar"), P("h", "scalar"), P("s", "scalar"), P("v", "scalar"), P("origin", "point", true)], cfg: [] },
     point:       { cat: "generator", out: "points", desc: "A single placeable point (x/y are canvas fractions, 0.5=centre); radius→size",
                    ports: [P("x", "scalar", true), P("y", "scalar", true), P("radius", "scalar", true)], cfg: [] },
-    emitter:     { cat: "source", out: "points", desc: "Spawn particles on a trigger; bake per-particle state",
-                   ports: [P("anchors", "points", true), P("gate", "scalar", true), P("count", "scalar", true), P("rate", "scalar", true), P("life", "scalar", true)],
+    emitter:     { cat: "source", out: "points", desc: "Spawn particles on a trigger; bake per-particle state. `max` caps the live population (oldest are retired over `retire` seconds) — use it instead of lifespan when density should be a headcount.",
+                   ports: [P("anchors", "points", true), P("gate", "scalar", true), P("count", "scalar", true), P("rate", "scalar", true), P("life", "scalar", true), P("max", "scalar", true), P("retire", "scalar", true)],
                    cfg: [{ name: "trigger", type: "enum", options: ["beat", "rate"], default: "beat" },
                          { name: "gateSrc", type: "enum", options: ["bass", "mid", "treble", "energy"], default: "energy" },
                          { name: "anchorMode", type: "enum", options: ["each", "weighted"], default: "each" },
@@ -854,16 +721,9 @@
                    ports: [P("pool", "points"), P("response", "scalar")], cfg: [] },
     move:        { cat: "integrator", out: "points", desc: "Ballistic constant-velocity motion + cull",
                    ports: [P("pool", "points")], cfg: [] },
-    waveTrace:   { cat: "geometry", out: "segments", desc: "Waveform strip between two points, displaced by a signal",
-                   ports: [P("a", "point"), P("b", "point"), P("signal", "signal"), P("amp", "scalar"), P("jitter", "scalar")], cfg: [] },
-    fractal:     { cat: "geometry", out: "segments", desc: "Fractal geometry per particle (baked once, re-pinned to anchor). shape 'bolt' = lightning (tip-drift reveal via travel); 'branch' = dendrite tree (root→tip growth reveal as the particle ages). spread/decay tune the branching.",
-                   ports: [P("pool", "points"), P("anchors", "points", true), P("detail", "scalar"), P("rough", "scalar"), P("branch", "scalar"), P("travel", "scalar", true), P("spread", "scalar", true), P("decay", "scalar", true), P("rainbow", "scalar", true), P("taper", "scalar", true)],
-                   cfg: [{ name: "shape", type: "enum", options: ["bolt", "branch"], default: "bolt" }] },
     glow:        { cat: "renderer", out: "layer", desc: "Soft additive sprites (per-particle rgb/size/life honored; size/colour ports are fallbacks)",
                    ports: [P("points", "points"), P("size", "scalar", true), P("alpha", "scalar", true), P("h", "scalar", true), P("s", "scalar", true), P("v", "scalar", true)],
                    cfg: [{ name: "halo", type: "bool" }, { name: "soft", type: "number", default: 2.4 }] },
-    lines:       { cat: "renderer", out: "layer", desc: "Rounded capsules (per-segment alpha)",
-                   ports: [P("segs", "segments"), P("width", "scalar"), P("h", "scalar"), P("s", "scalar"), P("v", "scalar")], cfg: [] },
     metaballs:   { cat: "renderer", out: "layer", desc: "Metaball liquid surface (blend is set by the scene layer: over = liquid)",
                    ports: [P("pool", "points"), P("size", "scalar"), P("opacity", "scalar"), P("threshold", "scalar"), P("edge", "scalar"), P("sheen", "scalar")], cfg: [] },
     radialBars:  { cat: "renderer", out: "layer", desc: "Radial capsules from spectrum points (add a crisp layer in the scene)",
