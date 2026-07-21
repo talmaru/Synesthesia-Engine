@@ -199,7 +199,7 @@ const Player = {
   },
 
   play() {
-    if (Engine.streaming) Engine.stopDesktop();   // switching to a file leaves desktop-capture mode
+    if (Engine.streaming) Engine.stopDesktop();   // switching to a file leaves desktop-capture mode (onDesktopEnd restores the bar)
     if (this.cur < 0 && activeList().length) { this.loadIndex(0, true); return; }
     Engine.attach(audio); Engine.resume();
     if (audio.ended) audio.currentTime = 0;
@@ -358,6 +358,34 @@ function renderPanel() {
   });
 }
 
+/* ---------------------------- audio-state indicator ----------------------------
+   Silence is indistinguishable from a broken setup: a modulator with no signal pins
+   its param to `min` and looks like it isn't working. So say so out loud — and say it
+   louder when modulators are actually linked, since that's when it misleads. */
+let silentMs = 0, audioStateKey = "";
+function updateAudioState(frame) {
+  const el = $("audioState"); if (!el) return;
+  const lvl = Math.max(frame.energy || 0, frame.bass || 0, frame.mid || 0, frame.treble || 0);
+  silentMs = lvl > 0.002 ? 0 : silentMs + (frame.dt || 16);
+  const silent = silentMs > 500;                       // debounce: ignore momentary gaps
+  const v = Host.viz;
+  const nMods = (v && v.mods) ? Object.keys(v.mods).length : 0;
+  const key = silent ? (nMods ? "warn" + nMods : "quiet") : "ok";
+  if (key === audioStateKey) return;                   // only touch the DOM on a change
+  audioStateKey = key;
+  if (!silent) { el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle("warn", nMods > 0);
+  if (nMods) {
+    el.textContent = "no audio — " + nMods + " modulator" + (nMods > 1 ? "s" : "") + " idle";
+    el.title = "No signal is reaching the analyser, so every linked parameter is being held at "
+             + "its modulator's minimum. Start a track, or pick a desktop source.";
+  } else {
+    el.textContent = "no audio";
+    el.title = "No signal is reaching the analyser.";
+  }
+}
+
 // Live readout for modulator-driven sliders (only while the panel is visible).
 function panelOpen() { const p = $("panel"); return p && p.classList.contains("open"); }
 function refreshLiveRows() {
@@ -441,7 +469,13 @@ function boot() {
 
   // desktop / system audio capture (getDisplayMedia) → analyser
   const dab = $("desktopAudio");
-  Engine.onDesktopEnd = () => { dab.classList.remove("active"); dab.textContent = "🖥 Desktop"; Player.status("Desktop audio stopped."); };
+  // entering/leaving desktop capture also swaps the transport out: with a live stream as the
+  // source there is nothing to seek, pause or advance, so those controls just mislead.
+  const setDesktopMode = on => { $("bar").classList.toggle("desktop", on); };
+  Engine.onDesktopEnd = () => {
+    dab.classList.remove("active"); dab.textContent = "🖥 Desktop";
+    setDesktopMode(false); Player.status("Desktop audio stopped.");
+  };
   if (dab) dab.addEventListener("click", async () => {
     if (Engine.streaming) { Engine.stopDesktop(); return; }
     try {
@@ -449,6 +483,7 @@ function boot() {
       await Engine.desktopAudio();
       if (audio && !audio.paused) audio.pause();   // don't double up with a playing file
       dab.classList.add("active"); dab.textContent = "◉ Desktop";
+      setDesktopMode(true);
       Player.status("Listening to desktop audio. Click again to stop.");
     } catch (e) {
       const n = e && e.name;
@@ -510,6 +545,7 @@ function boot() {
       Host.viz.frame(frame);
       if (panelOpen()) refreshLiveRows();
     }
+    updateAudioState(frame);
     updateSeekUI();
       if (fpsOn) {
       fps = fps * 0.9 + (1000 / Math.max(dt, 1)) * 0.1;

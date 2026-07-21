@@ -1,0 +1,61 @@
+{
+  "visual": "orbitscope",
+  "label": "Orbit Scope",
+  "params": {
+    "orbs": 6,
+    "radius": 0.05,
+    "spin": 0.1,
+    "glowSize": 22,
+    "glowAlpha": 1,
+    "waveAmp": 0.2,
+    "waveWidth": 2,
+    "jitter": 0.25,
+    "arcRate": 3,
+    "arcPower": 0.25,
+    "arcSpread": 0.25,
+    "arcLife": 0.5,
+    "arcWidth": 1.5,
+    "arcDetail": 4,
+    "arcRough": 0.4,
+    "hue": 183.01104000144022,
+    "hueSpread": 60,
+    "saturation": 100,
+    "trail": 0.8
+  },
+  "mods": {
+    "radius": {
+      "src": "bass",
+      "ops": [],
+      "min": 0.05,
+      "max": 0.45
+    },
+    "spin": {
+      "src": "energy",
+      "ops": [],
+      "min": 0.1,
+      "max": 3
+    },
+    "arcPower": {
+      "src": "energy",
+      "ops": [],
+      "min": 0.25,
+      "max": 1
+    },
+    "arcSpread": {
+      "src": "energy",
+      "ops": [],
+      "min": 0.25,
+      "max": 1
+    },
+    "hue": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.125,
+      "src2": null
+    }
+  }
+}

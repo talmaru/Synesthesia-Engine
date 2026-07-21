@@ -1,0 +1,50 @@
+{
+  "visual": "LiquidBounce",
+  "label": "Spectrum Bounce",
+  "params": {
+    "ballCount": 122001,
+    "ballRadius": 0.001,
+    "merge": 3,
+    "threshold": 2,
+    "edge": 0.02,
+    "sheen": 0,
+    "trail": 1,
+    "floorHeight": 0.3,
+    "smoothing": 0,
+    "gravity": 8,
+    "restitution": 0.1,
+    "puntGain": 1.5,
+    "hueSpread": 0,
+    "drop_h": 290.47672594298206,
+    "drop_s": 1,
+    "drop_v": 1,
+    "floor_h": 290.47672594298206,
+    "floor_s": 1,
+    "floor_v": 0.5,
+    "crest_h": 0,
+    "crest_s": 0,
+    "crest_v": 1
+  },
+  "mods": {
+    "drop_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.1,
+      "src2": null
+    },
+    "floor_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.1,
+      "src2": null
+    }
+  }
+}

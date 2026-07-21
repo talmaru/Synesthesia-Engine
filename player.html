@@ -56,6 +56,15 @@
   button { cursor:pointer; } button:hover { background:#182032; }
   button:disabled, select:disabled, input:disabled { opacity:.4; cursor:default; }
   #desktopAudio.active { border-color:var(--acc); color:var(--acc); background:#141c34; }
+  /* desktop capture is the source -> the file transport is meaningless, so hide it */
+  #bar.desktop .media { display:none; }
+  /* "no signal" indicator — sits next to the Desktop button in both modes */
+  .astate { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim);
+    padding:5px 10px; border:1px solid #2a3147; border-radius:8px; white-space:nowrap; }
+  .astate[hidden] { display:none; }
+  .astate::before { content:""; width:7px; height:7px; border-radius:50%; background:#566; flex:none; }
+  .astate.warn { color:#ffb454; border-color:#4a3a20; background:#1d1710; }
+  .astate.warn::before { background:#ffb454; }
   button.icon { width:40px; text-align:center; padding:7px 0; }
   .grp { display:flex; gap:6px; align-items:center; }
   .grp label { color:var(--dim); font-size:12px; }
@@ -142,20 +151,22 @@
   </main>
 
   <footer id="bar">
-    <div class="grp">
+    <!-- .media = file-playback controls; hidden while desktop capture is the source -->
+    <div class="grp media">
       <button id="prev" class="icon" title="Rewind to start">⏮</button>
       <button id="play" class="icon" title="Play/Pause">▶</button>
       <button id="stop" class="icon" title="Stop">⏹</button>
     </div>
     <button id="desktopAudio" title="Visualize live desktop / system audio (Chrome/Edge — pick a source and tick 'Share system/tab audio')">🖥 Desktop</button>
-    <span id="time">0:00 / 0:00</span>
-    <input id="seek" type="range" min="0" max="1000" value="0">
-    <div class="grp"><label>vol</label><input id="vol" type="range" min="0" max="100" value="75" style="width:90px"></div>
-    <div class="grp"><label>advance</label>
+    <span id="audioState" class="astate" hidden></span>
+    <span id="time" class="media">0:00 / 0:00</span>
+    <input id="seek" class="media" type="range" min="0" max="1000" value="0">
+    <div class="grp media"><label>vol</label><input id="vol" type="range" min="0" max="100" value="75" style="width:90px"></div>
+    <div class="grp media"><label>advance</label>
       <select id="advance"><option value="auto">auto</option><option value="manual">manual</option></select>
     </div>
-    <div class="grp"><label>gap</label><input id="gap" type="number" min="0" max="60" step="1" value="3" style="width:56px"> s</div>
-    <div class="grp"><label>order</label>
+    <div class="grp media"><label>gap</label><input id="gap" type="number" min="0" max="60" step="1" value="3" style="width:56px"> s</div>
+    <div class="grp media"><label>order</label>
       <select id="order"><option value="once">play once</option><option value="loop" selected>loop list</option><option value="shuffle">shuffle</option></select>
     </div>
     <div class="grp"><label>visual</label><select id="viz"></select></div>
@@ -187,6 +198,8 @@
 <script src="js/visuals/tesseract.js"></script>
 <script src="js/visuals/vortex.js"></script>
 <script src="js/visuals/photomolecular.js"></script>
+<script src="js/visuals/platonic.js"></script>
+<script src="js/visuals/stickman.js"></script>
 <!-- VISUALS_END -->
 </body>
 </html>

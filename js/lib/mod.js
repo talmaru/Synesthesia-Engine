@@ -44,15 +44,25 @@
       st.env = Math.max(0, (st.env || 0) - dt / d);
       return st.env;
     } },
-    // free-running oscillator; tempo-locked by default so it stays in step with the music
-    cycler: { label: "Cycler (LFO)", cycler: true, read: (m, st, a, dt) => {
+    // Free-running oscillator. Two cyclers at the same speed stay LOCKED to each other because
+    // the phase is SEEDED from a clock shared by the whole visual — so one you attach later is
+    // already in step with one that has been running for a minute, and `phase` (0..1 of a cycle)
+    // is a meaningful, stable offset between them. After seeding it accumulates locally, so
+    // changing `speed` alters the rate from now on instead of rewriting where the cycle is.
+    cycler: { label: "Cycler (LFO)", cycler: true, phase: true, read: (m, st, a, dt, clocks) => {
       const spd = m.speed != null ? m.speed : 0.25;
-      const bpm = a.bpm || 120;
-      st.ph = (st.ph || 0) + (m.timing === "time" ? spd * dt : spd * dt * (bpm / 60));
-      const fr = st.ph - Math.floor(st.ph);
+      const beats = m.timing !== "time";
+      if (st.ph == null) {
+        const master = clocks ? (beats ? clocks.beats : clocks.time) : 0;
+        st.ph = master * spd;                      // join the shared clock, already in phase
+      } else {
+        st.ph += spd * dt * (beats ? (a.bpm || 120) / 60 : 1);
+      }
+      const ph = st.ph + (m.phase || 0);
+      const fr = ph - Math.floor(ph);
       return m.mode === "ramp" ? fr
            : m.mode === "triangle" ? (fr < 0.5 ? fr * 2 : 2 - fr * 2)
-           : 0.5 - 0.5 * Math.cos(2 * Math.PI * st.ph);
+           : 0.5 - 0.5 * Math.cos(2 * Math.PI * ph);
     } },
   };
   // sources that can be blended as a second input (bands only — not beat/cycler)
@@ -81,15 +91,15 @@
 
   /* --------------------------------------------------------------- evaluate */
   // mod + scratch state + audio frame → the param value. Returns null if unlinked.
-  function evaluate(mod, st, a, dt) {
+  function evaluate(mod, st, a, dt, clocks) {
     if (!mod || !mod.src || mod.src === "none") return null;
     const src = SOURCES[mod.src];
     if (!src || !src.read) return null;
 
-    let x = src.read(mod, st, a, dt);
+    let x = src.read(mod, st, a, dt, clocks);
     // optional second band, blended in
     if (mod.src2 && SOURCES[mod.src2] && SOURCES[mod.src2].read) {
-      const y = SOURCES[mod.src2].read(mod, st, a, dt);
+      const y = SOURCES[mod.src2].read(mod, st, a, dt, clocks);
       const b = mod.blend != null ? mod.blend : 0.5;
       x = x + (y - x) * b;
     }
@@ -111,9 +121,15 @@
     const mods = v.mods;
     if (!mods) return;
     if (!v._modState) v._modState = {};
+    // Clocks shared by every modulator on this visual. Cyclers seed their phase from these, so
+    // same-speed cyclers agree no matter when each one was attached (and harmonically related
+    // speeds stay locked too). Advanced once per frame, before anything reads them.
+    const ck = v._modClocks || (v._modClocks = { time: 0, beats: 0 });
+    ck.time += dt;
+    ck.beats += dt * ((a.bpm || 120) / 60);
     for (const key in mods) {
       const st = v._modState[key] || (v._modState[key] = {});
-      const val = evaluate(mods[key], st, a, dt);
+      const val = evaluate(mods[key], st, a, dt, ck);
       if (val != null) v.p[key] = val;
     }
   }
@@ -127,7 +143,7 @@
   }
   function serialize(v) { return v.mods ? JSON.parse(JSON.stringify(v.mods)) : {}; }
   function hydrate(v, saved) {
-    v.mods = {}; v._modState = {};
+    v.mods = {}; v._modState = {}; v._modClocks = { time: 0, beats: 0 };
     if (!saved) return;
     (v.params || []).forEach(p => {
       if (p.key && saved[p.key] && saved[p.key].src) v.mods[p.key] = JSON.parse(JSON.stringify(saved[p.key]));
@@ -185,6 +201,21 @@
       r.appendChild(el("span", "mlab", "rate"));
       r.appendChild(numIn(mod.speed, 0.01, x => { mod.speed = x; onChange(); }));
       box.appendChild(r);
+
+      // Phase offset, in cycles. Cyclers share a clock, so this is a stable relationship
+      // between them: 0.5 = exactly opposite, 0.25 = a quarter cycle behind.
+      const r2 = el("div", "modrow");
+      r2.appendChild(el("span", "mlab", "offset"));
+      const ph = el("input"); ph.type = "range"; ph.min = 0; ph.max = 1; ph.step = 0.01;
+      ph.value = mod.phase || 0;
+      const phv = el("span", "mval", (mod.phase || 0).toFixed(2));
+      ph.addEventListener("input", () => { mod.phase = +ph.value; phv.textContent = (+ph.value).toFixed(2); onChange(); });
+      r2.appendChild(ph); r2.appendChild(phv);
+      const half = el("button", "mx", "½");
+      half.title = "Opposite phase (0.5)";
+      half.addEventListener("click", () => { mod.phase = 0.5; onChange(); renderParamMod(host, v, param, onChange); });
+      r2.appendChild(half);
+      box.appendChild(r2);
     }
     // beat envelope decay
     if (srcDef.decay) {

@@ -1,0 +1,86 @@
+{
+  "visual": "pulsar",
+  "label": "Spectrum Pulsar",
+  "params": {
+    "barGain": 1.25,
+    "barWidth": 1,
+    "innerRatio": 0.06,
+    "spin": 0.039641895126842436,
+    "trail": 0.12,
+    "emberMax": 40000,
+    "burstPct": 0.02,
+    "emberOnBeat": 0.15,
+    "emberIntensity": 0.3,
+    "emberSizeMin": 0.4,
+    "emberSizeMax": 1.2,
+    "emberLifeMin": 8,
+    "emberLifeMax": 14,
+    "core": 0.19820947563421215,
+    "coreSize": 0.06997999999998136,
+    "hueSpread": 0,
+    "ember_h": 189.94693749046456,
+    "ember_s": 0.92,
+    "ember_v": 0.85,
+    "bar_h": 9.94693749046455,
+    "bar_s": 1,
+    "bar_v": 0.9,
+    "core_h": 9.94693749046455,
+    "core_s": 0.92,
+    "core_v": 0.8
+  },
+  "mods": {
+    "core": {
+      "src": "energy",
+      "ops": [],
+      "min": 0,
+      "max": 0.25
+    },
+    "coreSize": {
+      "src": "beat",
+      "ops": [],
+      "min": 0.01,
+      "max": 0.08,
+      "decay": 0.35,
+      "src2": null
+    },
+    "ember_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.025,
+      "src2": null,
+      "phase": 0.5
+    },
+    "bar_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.025,
+      "src2": null,
+      "phase": 0
+    },
+    "core_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.025,
+      "src2": null,
+      "phase": 0
+    },
+    "spin": {
+      "src": "energy",
+      "ops": [],
+      "min": 0,
+      "max": 0.05
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "visual": "aurora",
+  "label": "Aurora",
+  "params": {
+    "curtains": 6,
+    "sharpness": 4,
+    "height": 0.2,
+    "baseY": -0.05,
+    "flowScale": 1.9,
+    "flowStr": 0.8,
+    "flowSpeed": 0.4,
+    "turbulence": 4,
+    "drift": 0.04,
+    "shimmer": 1,
+    "edgeGlow": 3,
+    "milkyway": 0.4,
+    "starDens": 1.5,
+    "mwAngle": -0.19,
+    "skyDrift": 0.2,
+    "natural": 1,
+    "bright": 1.2,
+    "aur_h": 39.88745999984701,
+    "aur_s": 1,
+    "aur_v": 1,
+    "trail": 0.8,
+    "bloom": 1.25,
+    "bloomThresh": 0.2
+  },
+  "mods": {
+    "aur_h": {
+      "src": "cycler",
+      "ops": [],
+      "min": 0,
+      "max": 360,
+      "mode": "ramp",
+      "timing": "beat",
+      "speed": 0.0125,
+      "src2": null
+    },
+    "height": {
+      "src": "energy",
+      "ops": [],
+      "min": 0.2,
+      "max": 1.2
+    }
+  }
+}

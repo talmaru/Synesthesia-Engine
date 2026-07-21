@@ -1,0 +1,23 @@
+{
+  "visual": "photomolecular",
+  "label": "Photomolecular Field",
+  "params": {
+    "fieldStrength": 0.2,
+    "bondForm": 0.5,
+    "bondStiff": 0.4,
+    "angleStiff": 1,
+    "reactivity": 1,
+    "beatHeat": 0.3,
+    "clusterBlast": 2,
+    "density": 2,
+    "interactRadius": 160,
+    "trail": 1,
+    "glowScale": 1.2,
+    "softness": 3.9,
+    "capColor": "#ef010d",
+    "linkColor": "#1100ff",
+    "hubColor": "#09f14e",
+    "bondColor": "#ebe300",
+    "ringColor": "#f3ecec"
+  }
+}

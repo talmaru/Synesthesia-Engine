@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<!--
+  SYNESTHESIA — node-graph editor (MVP).
+  Loads an existing visual DOCUMENT (from Synesthesia.Graph.docs), shows it as a
+  boxes-and-wires graph you can rewire/edit, and live-previews it against synthetic
+  audio. Save downloads a drop-in js/visuals/<id>.js. Open directly (file://); no server.
+  Classic <script> so it works from file://. Params are shown at their defaults here
+  (tune them in the player); this editor is about the graph STRUCTURE + bakes.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synesthesia Editor</title>
+<style>
+  :root { color-scheme: dark; --bg:#0a0c12; --pan:#0e121c; --line:#1d2333; --ink:#dfe7f5; --dim:#8893ab; --acc:#4a6cff;
+    --gen:#3aa0ff; --src:#c77dff; --force:#ff9a5a; --integ:#ffd24a; --geo:#5fd08a; --rend:#ff6b8b; --val:#4ad2c0; --out:#e0e6f0; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui, sans-serif; overflow:hidden; }
+  #app { display:grid; grid-template-rows:auto 1fr; height:100vh; }
+  #top { display:flex; gap:10px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--pan); }
+  #top .sp { flex:1; }
+  #top b { font-weight:600; letter-spacing:.3px; }
+  #status { font-size:12px; color:var(--dim); min-width:140px; }
+  #status.err { color:#ff8a8a; }
+  input, select, button, textarea { background:#11151f; color:var(--ink); border:1px solid #2a3147; border-radius:7px; padding:6px 9px; font:inherit; }
+  button { cursor:pointer; } button:hover { background:#182032; }
+  #main { display:grid; grid-template-columns:1fr 350px; min-height:0; }
+  #stage { position:relative; overflow:hidden; background:
+    radial-gradient(circle at center, #0d1120 0, #090b11 100%);
+    background-color:#090b11; }
+  #stage::before { content:""; position:absolute; inset:0;
+    background-image:linear-gradient(#141b2e 1px,transparent 1px),linear-gradient(90deg,#141b2e 1px,transparent 1px);
+    background-size:26px 26px; opacity:.5; }
+  #world { position:absolute; left:0; top:0; transform-origin:0 0; }
+  #wires { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
+  #nodes { position:absolute; left:0; top:0; }
+  .node { position:absolute; width:190px; background:#141a28; border:1px solid #29344f; border-radius:9px;
+    box-shadow:0 6px 18px rgba(0,0,0,.35); user-select:none; }
+  .node.sel { border-color:var(--acc); box-shadow:0 0 0 1px var(--acc), 0 6px 22px rgba(74,108,255,.35); }
+  .nhead { display:flex; align-items:center; gap:6px; padding:7px 9px; cursor:grab; border-bottom:1px solid #222c44;
+    border-radius:9px 9px 0 0; font-weight:600; }
+  .nhead .cat { width:8px; height:8px; border-radius:50%; flex:none; }
+  .nhead .id { color:var(--dim); font-weight:400; font-size:11px; margin-left:auto; }
+  .nbody { padding:4px 0 8px; position:relative; min-height:14px; }
+  .prow { display:flex; align-items:center; height:24px; padding:0 10px; font-size:12px; color:var(--dim); }
+  .prow .plab { white-space:nowrap; }
+  .port { position:absolute; width:12px; height:12px; border-radius:50%; background:#3a4560; border:2px solid #0a0c12; cursor:crosshair; }
+  .port.in { left:-7px; background:#5a6580; }
+  .port.pts { background:#3aa0ff; } .port.seg { background:#5fd08a; } .port.pt { background:#7ab8ff; }
+  .port.scl { background:#ffd24a; } .port.sig { background:#c77dff; } .port.lay { background:#e0e6f0; } .port.hf { background:#ff9a5a; }
+  .plabR { margin-left:auto; color:var(--dim); font-size:11px; white-space:nowrap; }
+  .port:hover { transform:scale(1.35); }
+  .srcnote { padding:2px 10px 4px; font-size:11px; color:#5b6580; font-style:italic; }
+  .caret { cursor:pointer; color:var(--dim); font-size:10px; width:12px; flex:none; text-align:center; }
+  .caret:hover { color:var(--ink); }
+  .node .ncfg { border-top:1px dashed #2a3450; padding:4px 9px 8px; }
+  .node .ncfg .csec { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:#66708a; margin:7px 0 1px; }
+  .node .ncfg .field { flex-wrap:wrap; gap:3px; margin:4px 0; align-items:center; }
+  .node .ncfg .field label { flex:0 0 100%; font-size:10px; color:var(--dim); }
+  .node .ncfg .field select, .node .ncfg .field input { flex:1; min-width:58px; padding:3px 6px; font-size:11px; }
+  .node .ncfg .field .x { flex:0 0 auto; padding:3px 6px; }
+  .node .ncfg .field textarea { flex:0 0 100%; font:11px/1.35 ui-monospace,monospace; min-height:56px; }
+  /* layer stack (scene node) */
+  .layerstack { display:flex; flex-direction:column; gap:3px; margin-top:3px; }
+  .lrow { display:flex; align-items:center; gap:4px; background:#11151f; border:1px solid #2a3147; border-radius:6px; padding:3px 5px; }
+  .lbtn { padding:1px 4px; font-size:10px; line-height:1; min-width:18px; }
+  .lbtn:disabled { opacity:.25; }
+  .lname { flex:1; min-width:0; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lrow select { padding:2px 4px; font-size:10px; width:52px; }
+  .lcrisp { display:flex; align-items:center; gap:2px; font-size:10px; color:var(--dim); }
+  .lcrisp input { width:auto; }
+  /* params table (params node) */
+  .paramtbl { display:flex; flex-direction:column; gap:2px; max-height:300px; overflow-y:auto; margin-top:3px; padding-right:2px; }
+  .ptrow { display:flex; gap:3px; align-items:center; }
+  .ptrow input { padding:2px 4px; font-size:10px; min-width:0; }
+  .ptrow .pt-name { flex:2; }
+  .ptrow input:not(.pt-name) { flex:1; width:38px; }
+  .ptrow select.pt-type { flex:0 0 auto; width:58px; padding:2px 3px; font-size:10px; }
+  .ptrow .lcrisp { flex:1; }
+  .ptrow .x { flex:0 0 auto; padding:2px 5px; }
+  /* sidebar */
+  #side { border-left:1px solid var(--line); background:var(--pan); display:flex; flex-direction:column; min-height:0; }
+  #preview { border-bottom:1px solid var(--line); padding:10px; }
+  #preview canvas { width:100%; height:180px; display:block; background:#000; border-radius:8px; }
+  #preview .lbl { font-size:11px; color:var(--dim); margin-bottom:6px; display:flex; justify-content:space-between; }
+  #insp { padding:12px; overflow-y:auto; flex:1; }
+  #insp h3 { margin:0 0 2px; font-size:14px; }
+  #insp .desc { color:var(--dim); font-size:12px; margin-bottom:10px; }
+  #insp .sec { margin:12px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); border-top:1px solid var(--line); padding-top:8px; }
+  .field { display:flex; align-items:center; gap:6px; margin:5px 0; }
+  .field label { flex:0 0 82px; color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .field select, .field input { flex:1; min-width:0; padding:4px 7px; }
+  .field .x { flex:0 0 auto; padding:4px 8px; color:var(--dim); }
+  .field textarea { flex:1; min-width:0; font:12px/1.4 ui-monospace,monospace; resize:vertical; min-height:70px; }
+  .wirefield { display:block; margin:6px 0; }
+  .wirefield .top { display:flex; align-items:center; gap:6px; }
+  .wirefield .src { flex:1; font-size:12px; color:var(--ink); background:#11151f; border:1px solid #2a3147; border-radius:6px; padding:4px 8px; }
+  .wirefield .src.empty { color:var(--dim); font-style:italic; }
+  .empty { color:var(--dim); font-size:13px; }
+  .hint { color:var(--dim); font-size:11px; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <b>Synesthesia · Graph Editor</b>
+    <select id="docSel" title="Load a visual document"></select>
+    <button id="revert" title="Reload from source">Revert</button>
+    <span class="sp"></span>
+    <span id="status"></span>
+    <select id="addSel" title="Add a node"></select>
+    <button id="addBtn">+ Node</button>
+    <button id="save">Save .js</button>
+    <a href="player.html" style="margin-left:6px;color:var(--dim);font-size:12px">← Player</a>
+  </div>
+  <div id="main">
+    <div id="stage">
+      <div id="world">
+        <svg id="wires"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+    <div id="side">
+      <div id="preview">
+        <div class="lbl"><span>Live preview</span><span id="pstat">synthetic audio</span></div>
+        <canvas id="pcanvas"></canvas>
+      </div>
+      <div id="insp"><div class="empty">Select a node to edit it. Drag a port to rewire. Drag the background to pan, scroll to zoom.</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- graph runtime: the editor builds + live-previews docs, so it needs the same libs the player loads -->
+<script src="js/lib/color.js"></script>
+<script src="js/lib/gl.js"></script>
+<script src="js/lib/expr.js"></script>
+<script src="js/lib/graph.js"></script>
+<!-- stub Synesthesia.register (additive — must NOT clobber .Graph) so the hand-coded visuals below don't throw;
+     graph docs self-register into Graph.docs via Graph.register. -->
+<script>Synesthesia.register = Synesthesia.register || function () {};</script>
+<script src="js/visuals/LiquidBounce.js"></script>
+<script src="js/visuals/chladni.js"></script>
+<script src="js/visuals/diagnostics.js"></script>
+<script src="js/visuals/orbitscope.js"></script>
+<script src="js/visuals/pulsar.js"></script>
+<script src="js/visuals/SpectrumIris.js"></script>
+<script src="js/visuals/dendrites.js"></script>
+<script src="js/visuals/aurora.js"></script>
+<script src="js/visuals/tesseract.js"></script>
+<script src="js/visuals/vortex.js"></script>
+<script src="js/visuals/photomolecular.js"></script>
+<script>
+"use strict";
+const G = Synesthesia.Graph, MAN = G.MANIFEST;
+const $ = id => document.getElementById(id);
+const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const clone = o => JSON.parse(JSON.stringify(o));
+const CATCOL = { generator:"var(--gen)", source:"var(--src)", force:"var(--force)", integrator:"var(--integ)", geometry:"var(--geo)", renderer:"var(--rend)", value:"var(--val)", output:"var(--out)" };
+const WIRE_KINDS = { points:"pts", point:"pt", segments:"seg", scalar:"scl", signal:"sig", layer:"lay", heightfield:"hf" };   // every input kind is now a wire
+const WIRE_COL = { points:"#3aa0ff", point:"#7ab8ff", segments:"#5fd08a", scalar:"#ffd24a", signal:"#c77dff", layer:"#e0e6f0", heightfield:"#ff9a5a" };
+
+const HEAD = 30, ROW = 24, NW = 190;
+const nodeWidth = n => (n && (n.type === "params" || n.type === "shader") && expanded.has(n.id)) ? 360 : NW;
+let doc = null, layout = {}, sel = null;
+const expanded = new Set();   // node ids whose on-node config panel is open
+const view = { x: 60, y: 40, z: 1 };
+const preview = { spec: null, raf: 0 };
+let rebuildTimer = 0;
+
+/* ------------------------------ helpers ------------------------------ */
+function status(msg, cls) { const s = $("status"); s.textContent = msg || ""; s.className = cls === "err" ? "err" : ""; }
+function refNodeId(ref) { if (typeof ref === "string") { const m = ref.match(/^([A-Za-z0-9_]+)/); return m ? m[1] : null; } return null; }
+function refIndex(ref) { if (typeof ref === "string") { const m = ref.match(/\[(\d+)\]$/); return m ? +m[1] : null; } return null; }
+function nodeById(id) { return doc.nodes.find(n => n.id === id); }
+function inPorts(node) { return G.effectivePorts(node).filter(p => WIRE_KINDS[p.kind]); }   // manifest ports + dynamic @expr ports, wireable
+function outPorts(node) { return G.effectiveOuts(node); }   // manifest outs, or dynamic (params table = one out per row)
+function nodeRows(n) { return Math.max(inPorts(n).length, outPorts(n).length); }
+function nodeH(n) { return HEAD + Math.max(1, nodeRows(n)) * ROW + 8; }
+
+/* ------------------------------ load / layout ------------------------------ */
+function loadDoc(id) {
+  doc = clone(G.docs[id]);
+  autoLayout(); sel = null; renderAll(); rebuildPreview();
+  status("loaded " + id);
+}
+function autoLayout() {
+  const map = {}; doc.nodes.forEach(n => map[n.id] = n);
+  layout = {};
+  // param nodes go in a compact grid on the left (there can be dozens); everything else
+  // flows by dependency depth to the right of that grid.
+  const params = doc.nodes.filter(n => n.type === "param"), others = doc.nodes.filter(n => n.type !== "param");
+  const PCOLS = 4, PW = 200, PH = 78;
+  params.forEach((n, i) => { layout[n.id] = { x: 20 + (i % PCOLS) * PW, y: 20 + ((i / PCOLS) | 0) * PH }; });
+  const zoneX = params.length ? 20 + Math.min(params.length, PCOLS) * PW + 50 : 30;
+  const depth = {};
+  const dep = (id, seen) => {
+    if (depth[id] != null) return depth[id];
+    if (seen.has(id)) return 0; seen.add(id);
+    let d = 0; const n = map[id];
+    Object.values(n.in || {}).forEach(r => { const s = refNodeId(r); if (s && map[s] && map[s].type !== "param") d = Math.max(d, dep(s, seen) + 1); });
+    if (n.type === "scene" && n.cfg && n.cfg.layers) n.cfg.layers.forEach(L => { if (L.node && map[L.node] && map[L.node].type !== "param") d = Math.max(d, dep(L.node, seen) + 1); });
+    return depth[id] = d;
+  };
+  others.forEach(n => dep(n.id, new Set()));
+  const byD = {}; others.forEach(n => { (byD[depth[n.id]] = byD[depth[n.id]] || []).push(n.id); });
+  Object.keys(byD).forEach(d => byD[d].forEach((id, row) => { layout[id] = { x: zoneX + d * 260, y: 20 + row * 210 }; }));
+}
+
+/* ------------------------------ render ------------------------------ */
+function applyView() { $("world").style.transform = `translate(${view.x}px,${view.y}px) scale(${view.z})`; }
+
+function renderAll() { applyView(); renderNodes(); renderWires(); renderInspector(); }
+
+function renderNodes() {
+  const host = $("nodes"); host.innerHTML = "";
+  doc.nodes.forEach(n => {
+    const man = MAN[n.type] || { cat: "", ports: [], cfg: [], desc: "" };
+    const L = layout[n.id] || (layout[n.id] = { x: 40, y: 40 });
+    const box = el("div", "node" + (n.id === sel ? " sel" : ""));
+    const NWn = nodeWidth(n);
+    box.style.left = L.x + "px"; box.style.top = L.y + "px"; box.style.width = NWn + "px"; box.dataset.id = n.id;
+    const head = el("div", "nhead");
+    const car = el("span", "caret", expanded.has(n.id) ? "▾" : "▸");
+    car.title = "inputs / config";
+    car.addEventListener("pointerdown", e => e.stopPropagation());   // don't start a drag
+    car.addEventListener("click", e => { e.stopPropagation(); expanded.has(n.id) ? expanded.delete(n.id) : expanded.add(n.id); renderNodes(); });
+    const dot = el("span", "cat"); dot.style.background = CATCOL[man.cat] || "#889";
+    head.appendChild(car); head.appendChild(dot); head.appendChild(el("span", null, n.type));
+    head.appendChild(el("span", "id", n.id));
+    box.appendChild(head);
+    const body = el("div", "nbody");
+    const ins = inPorts(n), outs = outPorts(n), rows = Math.max(ins.length, outs.length);
+    if (!rows) body.appendChild(el("div", "srcnote", man.cat === "renderer" ? "(sink)" : "(source)"));
+    for (let i = 0; i < rows; i++) {
+      const row = el("div", "prow"), ip = ins[i], op = outs[i];
+      if (ip) {
+        row.appendChild(el("span", "plab", ip.name + (ip.opt ? " ?" : "")));
+        const pd = el("div", "port in " + WIRE_KINDS[ip.kind]); pd.style.top = (HEAD + i * ROW + ROW / 2 - 6) + "px";
+        pd.dataset.node = n.id; pd.dataset.port = ip.name; pd.dataset.dir = "in"; pd.dataset.kind = ip.kind;
+        pd.title = ip.name + " : " + ip.kind; box.appendChild(pd);
+      }
+      if (op) {
+        const lab = el("span", "plabR", op.name || "out"); row.appendChild(lab);
+        const od = el("div", "port out " + WIRE_KINDS[op.kind]); od.style.top = (HEAD + i * ROW + ROW / 2 - 6) + "px"; od.style.left = (NWn - 5) + "px";
+        od.dataset.node = n.id; od.dataset.dir = "out"; od.dataset.kind = op.kind; if (op.name) od.dataset.out = op.name;
+        od.title = (op.name || "out") + " : " + op.kind; box.appendChild(od);
+      }
+      body.appendChild(row);
+    }
+    box.appendChild(body);
+    if (expanded.has(n.id)) {   // inline values/config panel — set constants for unwired inputs + edit cfg
+      const cfg = el("div", "ncfg"), cf = man.cfg || [];
+      if (ins.length) { cfg.appendChild(el("div", "csec", "inputs")); ins.forEach(p => cfg.appendChild(portField(n, p))); }
+      if (cf.length) { cfg.appendChild(el("div", "csec", "config")); cf.forEach(c => cfg.appendChild(cfgField(n, c))); }
+      if (!ins.length && !cf.length) cfg.appendChild(el("div", "srcnote", "no inputs"));
+      box.appendChild(cfg);
+    }
+    host.appendChild(box);
+    head.addEventListener("pointerdown", e => startNodeDrag(e, n.id));
+    box.addEventListener("pointerdown", e => { if (e.target.closest(".port")) return; select(n.id); });
+  });
+}
+
+function portXY(id, dir, port) {
+  const L = layout[id], n = nodeById(id); if (!L) return { x: 0, y: 0 };
+  if (dir === "out") { const outs = outPorts(n); let i = 0; if (port != null) { i = outs.findIndex(o => o.name === port); if (i < 0) i = 0; } return { x: L.x + nodeWidth(n), y: L.y + HEAD + i * ROW + ROW / 2 }; }
+  const ins = inPorts(n); const i = ins.findIndex(p => p.name === port);
+  return { x: L.x, y: L.y + HEAD + (i < 0 ? 0 : i) * ROW + ROW / 2 };
+}
+function wirePath(a, b) { const dx = Math.max(40, Math.abs(b.x - a.x) * 0.5); return `M ${a.x} ${a.y} C ${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`; }
+// parse a node-wire ref "src", "src:out", "src[i]" → {src, out}; returns null for {param}/{const}/{audio} literals
+function parseWire(ref) { if (typeof ref !== "string") return null; const m = ref.match(/^([A-Za-z0-9_]+)(?::([A-Za-z0-9_]+))?(?:\[\d+\])?$/); return m ? { src: m[1], out: m[2] || null } : null; }
+
+function renderWires() {
+  const svg = $("wires"); svg.innerHTML = "";
+  doc.nodes.forEach(n => {
+    inPorts(n).forEach(p => {
+      const w = parseWire(n.in && n.in[p.name]);   // only node wires; literals are edited inline
+      if (!w || !nodeById(w.src)) return;
+      const a = portXY(w.src, "out", w.out), b = portXY(n.id, "in", p.name);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", wirePath(a, b));
+      path.setAttribute("fill", "none"); path.setAttribute("stroke", WIRE_COL[p.kind] || "#3aa0ff");
+      path.setAttribute("stroke-width", "2"); path.setAttribute("opacity", ".7");
+      svg.appendChild(path);
+    });
+    // scene layer stack: a wire from each layer's renderer output → the scene's `layers` port
+    if (n.type === "scene" && n.cfg && n.cfg.layers) n.cfg.layers.forEach(L => {
+      if (!nodeById(L.node)) return;
+      const a = portXY(L.node, "out"), b = portXY(n.id, "in", "layers");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", wirePath(a, b)); path.setAttribute("fill", "none");
+      path.setAttribute("stroke", WIRE_COL.layer); path.setAttribute("stroke-width", "2"); path.setAttribute("opacity", ".55");
+      svg.appendChild(path);
+    });
+  });
+  // dashed "reference" wires: params referenced BY NAME inside expr cfgs (@name in a
+  // bake/count/burstBake) or by the doc-level trail. These aren't port wires — the value is
+  // looked up by name — but drawing them keeps the graph honest (no param node looks orphaned).
+  const dashRef = (pid, b) => {
+    if (!pid || !layout[pid] || !b) return;
+    const a = portXY(pid, "out"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", wirePath(a, b)); path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "var(--val)"); path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-dasharray", "2 5"); path.setAttribute("opacity", ".45");
+    svg.appendChild(path);
+  };
+  // expr @refs are now real (dynamic) ports drawn as solid wires above; only the doc-level
+  // `trail` still links by name (it drives the frame fade, which isn't a node port).
+  if (doc.trail && doc.trail.param) dashRef(paramNodeIdByName(doc.trail.param), { x: 8, y: 8 });
+}
+function paramNodeIdByName(name) { const p = doc.nodes.find(x => x.type === "param" && x.cfg && x.cfg.name === name); return p ? p.id : null; }
+
+/* ------------------------------ inspector ------------------------------ */
+function select(id) {   // lightweight: just move the highlight — never rebuild boxes (would kill open config editors)
+  sel = id;
+  document.querySelectorAll("#nodes .node").forEach(b => b.classList.toggle("sel", b.dataset.id === id));
+  renderInspector();
+}
+
+function renderInspector() {
+  const box = $("insp"); box.innerHTML = "";
+  if (!sel) { box.innerHTML = '<div class="empty">Select a node to edit it. Drag a port to rewire.</div>'; return; }
+  const n = nodeById(sel); if (!n) { sel = null; return renderInspector(); }
+  const man = MAN[n.type] || { ports: [], cfg: [], desc: "" };
+  box.appendChild(el("h3", null, n.type));
+  box.appendChild(el("div", "desc", man.desc || ""));
+
+  const idf = field("id");
+  const idIn = el("input"); idIn.value = n.id; idIn.addEventListener("change", () => renameNode(n, idIn.value.trim()));
+  idf.appendChild(idIn); box.appendChild(idf);
+
+  // every input port: a wire shows its source (+ disconnect); an unwired scalar shows its value editor
+  const ins = inPorts(n);
+  if (ins.length) { box.appendChild(sec("Inputs")); ins.forEach(p => box.appendChild(portField(n, p))); }
+
+  // cfg
+  if (man.cfg && man.cfg.length) { box.appendChild(sec("Config")); man.cfg.forEach(c => box.appendChild(cfgField(n, c))); }
+
+  box.appendChild(sec(""));
+  const del = el("button", null, "Delete node"); del.style.color = "#ff8a8a";
+  del.addEventListener("click", () => deleteNode(n.id)); box.appendChild(del);
+}
+function sec(t) { return el("div", "sec", t); }
+function field(lab) { const f = el("div", "field"); f.appendChild(el("label", null, lab)); return f; }
+
+// one editor per input port: node-wired → show source; unwired scalar/signal → value editor;
+// unwired structural (points/segments) → a "connect a wire" hint.
+function portField(n, p) {
+  if (p.kind === "layer") return layerStackField(n);   // the scene's ordered layer stack (edits cfg.layers)
+  if (parseWire(n.in && n.in[p.name])) return wireField(n, p);
+  if (p.kind === "scalar" || p.kind === "signal") return scalarField(n, p);
+  const f = el("div", "wirefield"), top = el("div", "top");
+  top.appendChild(el("label", null, p.name)); top.appendChild(el("div", "src empty", "— connect a wire —"));
+  f.appendChild(top); return f;
+}
+
+// the scene node's ordered layer stack: reorder (▲▼), per-layer blend (add/over) + crisp toggle,
+// remove. Renderers are added to the stack by dragging their `layer` output onto the scene node.
+function layerStackField(n) {
+  n.cfg = n.cfg || {}; const layers = n.cfg.layers = n.cfg.layers || [];
+  const refresh = () => { renderNodes(); renderWires(); renderInspector(); scheduleRebuild(); };
+  const f = el("div", "wirefield"); f.appendChild(el("label", null, "layers (bottom → top)"));
+  const stack = el("div", "layerstack");
+  layers.forEach((L, i) => {
+    const row = el("div", "lrow");
+    const up = el("button", "lbtn", "▲"); if (i === 0) up.disabled = true; up.onclick = () => { const t = layers[i - 1]; layers[i - 1] = layers[i]; layers[i] = t; refresh(); };
+    const dn = el("button", "lbtn", "▼"); if (i === layers.length - 1) dn.disabled = true; dn.onclick = () => { const t = layers[i + 1]; layers[i + 1] = layers[i]; layers[i] = t; refresh(); };
+    const name = el("span", "lname", L.node);
+    const blend = el("select"); ["add", "over"].forEach(b => blend.appendChild(new Option(b, b))); blend.value = L.blend || "add"; blend.onchange = () => { L.blend = blend.value; scheduleRebuild(); };
+    const crisp = el("label", "lcrisp"); const cb = el("input"); cb.type = "checkbox"; cb.checked = !!L.crisp; cb.title = "crisp = draw on top (not trailed)"; cb.onchange = () => { L.crisp = cb.checked; scheduleRebuild(); }; crisp.appendChild(cb); crisp.appendChild(el("span", null, "crisp"));
+    const rm = el("button", "x", "✕"); rm.title = "remove layer"; rm.onclick = () => { layers.splice(i, 1); refresh(); };
+    row.appendChild(up); row.appendChild(dn); row.appendChild(name); row.appendChild(blend); row.appendChild(crisp); row.appendChild(rm);
+    stack.appendChild(row);
+  });
+  if (!layers.length) stack.appendChild(el("div", "srcnote", "drag a renderer's layer output onto this node"));
+  f.appendChild(stack); return f;
+}
+
+function wireField(n, p) {
+  const f = el("div", "wirefield");
+  const top = el("div", "top"); top.appendChild(el("label", null, p.name));
+  const ref = n.in && n.in[p.name]; const src = refNodeId(ref);
+  const srcBox = el("div", "src" + (src ? "" : " empty"), src ? ref : "— not connected —");
+  top.appendChild(srcBox);
+  if (src) { const x = el("button", "x", "✕"); x.title = "disconnect"; x.addEventListener("click", () => { delete n.in[p.name]; changed(true); }); top.appendChild(x); }
+  f.appendChild(top);
+  if (src && p.kind === "point") {   // editable index for indexed single-point refs
+    const idxf = field("index"); const ii = el("input"); ii.type = "number"; ii.min = 0; ii.value = refIndex(ref) || 0;
+    ii.addEventListener("change", () => { n.in[p.name] = src + "[" + Math.max(0, ii.value | 0) + "]"; changed(true); });
+    idxf.appendChild(ii); f.appendChild(idxf);
+  }
+  return f;
+}
+
+function scalarField(n, p) {
+  const f = field(p.name);
+  const ref = n.in && n.in[p.name];
+  const mode = el("select"); ["param", "const", "audio", "none"].forEach(m => mode.appendChild(new Option(m, m)));
+  const cur = ref == null ? "none" : (ref.param != null ? "param" : ref.const != null ? "const" : ref.audio != null ? "audio" : "none");
+  mode.value = cur; f.appendChild(mode);
+  const valWrap = el("span"); valWrap.style.flex = "1"; valWrap.style.display = "flex"; f.appendChild(valWrap);
+  const rangeKeys = (doc.params || []).filter(q => q.type === "range").map(q => q.key);
+  function buildVal() {
+    valWrap.innerHTML = ""; const m = mode.value;
+    if (m === "param") {
+      const s = el("select"); rangeKeys.forEach(k => s.appendChild(new Option(k, k)));
+      s.value = (ref && ref.param) || rangeKeys[0] || ""; s.style.flex = "1";
+      s.addEventListener("change", () => { n.in[p.name] = { param: s.value }; changed(false); });
+      valWrap.appendChild(s); if (cur !== "param") { n.in = n.in || {}; n.in[p.name] = { param: s.value }; }
+    } else if (m === "const") {
+      const i = el("input"); i.type = "number"; i.step = "any"; i.value = (ref && ref.const != null) ? ref.const : 0; i.style.flex = "1";
+      i.addEventListener("change", () => { n.in[p.name] = { const: +i.value }; changed(false); });
+      valWrap.appendChild(i);
+    } else if (m === "audio") {
+      const s = el("select"); ["bass", "mid", "treble", "energy", "beat", "wave", "bins"].forEach(k => s.appendChild(new Option(k, k)));
+      s.value = (ref && ref.audio) || "energy"; s.style.flex = "1";
+      s.addEventListener("change", () => { n.in[p.name] = { audio: s.value }; changed(false); });
+      valWrap.appendChild(s); if (cur !== "audio") { n.in = n.in || {}; n.in[p.name] = { audio: s.value }; }
+    } else { if (n.in) delete n.in[p.name]; }
+  }
+  mode.addEventListener("change", () => { buildVal(); changed(false); });
+  buildVal();
+  return f;
+}
+
+function cfgField(n, c) {
+  n.cfg = n.cfg || {};
+  if (c.type === "expr") {
+    const f = el("div", "field"); f.style.alignItems = "flex-start";
+    f.appendChild(el("label", null, c.name));
+    const ta = el("textarea"); ta.value = n.cfg[c.name] || ""; ta.spellcheck = false;
+    ta.addEventListener("change", () => { if (ta.value.trim()) n.cfg[c.name] = ta.value; else delete n.cfg[c.name]; changed(true); });   // @refs → dynamic ports, so re-render
+    f.appendChild(ta); return f;
+  }
+  if (c.type === "glsl") {
+    const f = el("div", "field"); f.style.alignItems = "flex-start";
+    f.appendChild(el("label", null, c.name));
+    const ta = el("textarea"); ta.value = n.cfg[c.name] || ""; ta.spellcheck = false;
+    ta.style.minHeight = "160px"; ta.style.fontSize = "10px";
+    ta.addEventListener("change", () => { if (ta.value.trim()) n.cfg[c.name] = ta.value; else delete n.cfg[c.name]; changed(true); });   // uniforms → dynamic ports, re-render
+    f.appendChild(ta); return f;
+  }
+  if (c.type === "paramrows") return paramRowsField(n);
+  if (c.type === "visualref") {   // pick which hand-coded visual this `visual` node wraps
+    const f = field(c.name), s = el("select"); const ids = Object.keys((G.wraps) || {});
+    ids.forEach(id => s.appendChild(new Option(id, id)));
+    s.value = n.cfg[c.name] != null ? n.cfg[c.name] : ids[0] || "";
+    if (!n.cfg[c.name] && ids[0]) n.cfg[c.name] = ids[0];
+    s.addEventListener("change", () => { n.cfg[c.name] = s.value; changed(true); });   // its ports = the wrapped visual's params, so re-render
+    f.appendChild(s); return f;
+  }
+  const f = field(c.name);
+  if (c.type === "enum") {
+    const s = el("select"); c.options.forEach(o => s.appendChild(new Option(o, o)));
+    s.value = n.cfg[c.name] != null ? n.cfg[c.name] : (c.default != null ? c.default : c.options[0]);
+    s.addEventListener("change", () => { n.cfg[c.name] = s.value; changed(false); }); f.appendChild(s);
+  } else if (c.type === "bool") {
+    const i = el("input"); i.type = "checkbox"; i.checked = !!n.cfg[c.name]; i.style.flex = "0";
+    i.addEventListener("change", () => { n.cfg[c.name] = i.checked; changed(false); }); f.appendChild(i);
+  } else if (c.type === "number") {
+    const i = el("input"); i.type = "number"; i.step = "any"; i.value = n.cfg[c.name] != null ? n.cfg[c.name] : (c.default != null ? c.default : 0);
+    i.addEventListener("change", () => { n.cfg[c.name] = +i.value; changed(false); }); f.appendChild(i);
+  } else {
+    const i = el("input"); i.value = n.cfg[c.name] || ""; i.addEventListener("change", () => { n.cfg[c.name] = i.value; changed(false); }); f.appendChild(i);
+  }
+  return f;
+}
+
+// the `params` table editor: a row per parameter (name · type · fields). Each row is a wireable
+// output. type range = slider (def/min/max/step); bool = 0/1 toggle (checkbox); select = string
+// dropdown (default + comma-separated options). Add/remove; renaming re-renders (outputs change).
+function paramRowsField(n) {
+  n.cfg = n.cfg || {}; const rows = n.cfg.rows = n.cfg.rows || [];
+  const struct = () => { renderNodes(); renderWires(); renderInspector(); scheduleRebuild(); };
+  const numIn = (r, key) => { const i = el("input"); i.type = "number"; i.step = "any"; i.title = key; i.value = r[key] != null ? r[key] : 0; i.onchange = () => { r[key] = +i.value; scheduleRebuild(); }; return i; };
+  const f = el("div", "wirefield"); f.appendChild(el("label", null, "params — name · type · fields"));
+  const tbl = el("div", "paramtbl");
+  rows.forEach((r, i) => {
+    const t = r.type || "range", row = el("div", "ptrow");
+    const nm = el("input", "pt-name"); nm.value = r.name || ""; nm.placeholder = "name"; nm.onchange = () => { r.name = nm.value.trim(); struct(); };
+    const ty = el("select", "pt-type"); ["range", "select", "bool"].forEach(o => ty.appendChild(new Option(o, o))); ty.value = t; ty.onchange = () => { r.type = ty.value; renderInspector(); scheduleRebuild(); };
+    row.appendChild(nm); row.appendChild(ty);
+    if (t === "range") { row.appendChild(numIn(r, "def")); row.appendChild(numIn(r, "min")); row.appendChild(numIn(r, "max")); row.appendChild(numIn(r, "step")); }
+    else if (t === "bool") { const w = el("label", "lcrisp"); const cb = el("input"); cb.type = "checkbox"; cb.checked = !!r.def; cb.onchange = () => { r.def = cb.checked; scheduleRebuild(); }; w.appendChild(cb); w.appendChild(el("span", null, "default on")); row.appendChild(w); }
+    else { const dv = el("input"); dv.placeholder = "default"; dv.value = r.def != null ? r.def : ""; dv.style.flex = "1"; dv.onchange = () => { r.def = dv.value; scheduleRebuild(); };
+           const op = el("input"); op.placeholder = "opt, opt"; op.title = "options"; op.value = (r.options || []).join(", "); op.style.flex = "2"; op.onchange = () => { r.options = op.value.split(",").map(s => s.trim()).filter(Boolean); scheduleRebuild(); };
+           row.appendChild(dv); row.appendChild(op); }
+    const rm = el("button", "x", "✕"); rm.title = "remove param"; rm.onclick = () => { rows.splice(i, 1); struct(); };
+    row.appendChild(rm); tbl.appendChild(row);
+  });
+  f.appendChild(tbl);
+  const add = el("button", null, "+ param"); add.style.marginTop = "4px";
+  add.onclick = () => { rows.push({ name: "param" + (rows.length + 1), type: "range", def: 0, min: 0, max: 1, step: 0.01 }); struct(); };
+  f.appendChild(add); return f;
+}
+
+/* ------------------------------ edits ------------------------------ */
+function changed(structural) { if (structural) { renderNodes(); renderWires(); } scheduleRebuild(); }
+function renameNode(n, newId) {
+  if (!newId || newId === n.id || nodeById(newId)) return;
+  const old = n.id;
+  doc.nodes.forEach(m => { if (m.in) Object.keys(m.in).forEach(k => { const r = m.in[k]; if (typeof r === "string" && refNodeId(r) === old) m.in[k] = r.replace(/^[A-Za-z0-9_]+/, newId); }); });
+  layout[newId] = layout[old]; delete layout[old]; n.id = newId; sel = newId; renderAll(); scheduleRebuild();
+}
+function deleteNode(id) {
+  doc.nodes = doc.nodes.filter(n => n.id !== id);
+  doc.nodes.forEach(m => { if (m.in) Object.keys(m.in).forEach(k => { if (refNodeId(m.in[k]) === id) delete m.in[k]; }); });
+  delete layout[id]; if (sel === id) sel = null; renderAll(); scheduleRebuild();
+}
+function addNode(type) {
+  let i = 1, id; do { id = type + i++; } while (nodeById(id));
+  const man = MAN[type], cfg = {};
+  (man.cfg || []).forEach(c => { if (c.default != null) cfg[c.name] = c.default; });
+  const n = { id, type, in: {} }; if (Object.keys(cfg).length) n.cfg = cfg;
+  doc.nodes.push(n);
+  layout[id] = { x: (-view.x + 260) / view.z, y: (-view.y + 120) / view.z };
+  select(id); renderAll(); scheduleRebuild();
+}
+
+/* ------------------------------ connect (drag port → port) ------------------------------ */
+let drag = null;
+$("stage").addEventListener("pointerdown", e => {
+  const port = e.target.closest(".port");
+  if (port) { e.stopPropagation(); startWire(e, port); return; }
+  if (e.target.closest(".node")) return;
+  select(null);
+  drag = { pan: true, sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+});
+function startWire(e, port) {
+  const from = { node: port.dataset.node, dir: port.dataset.dir, kind: port.dataset.kind, port: port.dataset.port, out: port.dataset.out };
+  const svg = $("wires"); const temp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  temp.setAttribute("fill", "none"); temp.setAttribute("stroke", WIRE_COL[from.kind] || "#8fb6ff"); temp.setAttribute("stroke-width", "2"); temp.setAttribute("stroke-dasharray", "5 4");
+  svg.appendChild(temp);
+  const start = from.dir === "out" ? portXY(from.node, "out", from.out) : portXY(from.node, "in", from.port);
+  drag = { wire: true, from, temp, start };
+}
+function toWorld(clientX, clientY) { const r = $("stage").getBoundingClientRect(); return { x: (clientX - r.left - view.x) / view.z, y: (clientY - r.top - view.y) / view.z }; }
+window.addEventListener("pointermove", e => {
+  if (!drag) return;
+  if (drag.pan) { view.x = drag.ox + (e.clientX - drag.sx); view.y = drag.oy + (e.clientY - drag.sy); applyView(); }
+  else if (drag.node) {
+    const w = toWorld(e.clientX, e.clientY); layout[drag.node] = { x: w.x - drag.dx, y: w.y - drag.dy };
+    const b = document.querySelector('.node[data-id="' + drag.node + '"]'); if (b) { b.style.left = layout[drag.node].x + "px"; b.style.top = layout[drag.node].y + "px"; }
+    renderWires();
+  }
+  else if (drag.wire) { const w = toWorld(e.clientX, e.clientY); drag.temp.setAttribute("d", wirePath(drag.start, w)); }
+});
+window.addEventListener("pointerup", e => {
+  if (drag && drag.wire) {
+    const t = document.elementFromPoint(e.clientX, e.clientY);
+    const tp = t && t.closest ? t.closest(".port") : null;
+    if (tp) connect(drag.from, { node: tp.dataset.node, dir: tp.dataset.dir, kind: tp.dataset.kind, port: tp.dataset.port, out: tp.dataset.out });
+    drag.temp.remove();
+  }
+  drag = null;
+});
+function connect(a, b) {
+  // normalize: one end must be an output, the other an input port
+  const outEnd = a.dir === "out" ? a : b.dir === "out" ? b : null;
+  const inEnd = a.dir === "in" ? a : b.dir === "in" ? b : null;
+  if (!outEnd || !inEnd || outEnd.node === inEnd.node) return status("connect an output to an input", "err");
+  // layer output → the scene's layers stack: append an entry (not a normal single-ref wire)
+  if (inEnd.kind === "layer" && outEnd.kind === "layer") {
+    const sc = nodeById(inEnd.node); sc.cfg = sc.cfg || {}; sc.cfg.layers = sc.cfg.layers || [];
+    if (!sc.cfg.layers.some(L => L.node === outEnd.node)) sc.cfg.layers.push({ node: outEnd.node, blend: "add", crisp: false });
+    status(""); renderNodes(); renderWires(); renderInspector(); scheduleRebuild(); return;
+  }
+  const okPt = inEnd.kind === "point" && outEnd.kind === "points";   // indexed single point from a set
+  if (!(inEnd.kind === outEnd.kind || okPt)) return status(`can't wire ${outEnd.kind} → ${inEnd.kind}`, "err");
+  const n = nodeById(inEnd.node); n.in = n.in || {};
+  n.in[inEnd.port] = outEnd.node + (outEnd.out ? ":" + outEnd.out : "") + (okPt ? "[0]" : "");
+  status(""); renderWires(); if (sel === inEnd.node) renderInspector(); scheduleRebuild();
+}
+
+/* ------------------------------ node drag / pan / zoom ------------------------------ */
+function startNodeDrag(e, id) {
+  e.stopPropagation(); select(id);
+  const w = toWorld(e.clientX, e.clientY), L = layout[id];
+  drag = { node: id, dx: w.x - L.x, dy: w.y - L.y };
+}
+$("stage").addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = $("stage").getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const nz = Math.min(1.8, Math.max(0.35, view.z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+  view.x = mx - (mx - view.x) * (nz / view.z); view.y = my - (my - view.y) * (nz / view.z); view.z = nz; applyView();
+}, { passive: false });
+window.addEventListener("keydown", e => { if ((e.key === "Delete" || e.key === "Backspace") && sel && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") { deleteNode(sel); } });
+
+/* ------------------------------ live preview ------------------------------ */
+function paramDefaults(spec) {
+  // seed the param table from the BUILT spec's params (synthesized from `param` nodes, or a
+  // legacy doc.params array) so bakes reading @name and param nodes get their default values.
+  const p = {};
+  (spec.params || []).forEach(pr => { if (!pr.key) return; if (pr.type === "cyclers") p[pr.key] = Synesthesia.Color.defaultCyclers(); else if (pr.default != null) p[pr.key] = pr.default; });
+  return p;
+}
+function synthAudio(t, dt) {
+  const beat = (t % 0.5) < dt;
+  const bass = 0.5 + 0.45 * Math.sin(t * 2.0), mid = 0.5 + 0.4 * Math.sin(t * 3.1 + 1), treble = 0.45 + 0.4 * Math.sin(t * 5.3 + 2);
+  const energy = 0.55 + 0.4 * Math.abs(Math.sin(t * 1.7));
+  const bins = new Float32Array(128), wave = new Float32Array(128);
+  const h1 = 28 + 22 * Math.sin(t * 0.7), h2 = 82 + 16 * Math.sin(t * 0.9 + 1);
+  for (let i = 0; i < 128; i++) {
+    let v = 0.9 * Math.exp(-((i - h1) ** 2) / 90) + 0.7 * Math.exp(-((i - h2) ** 2) / 140);
+    v *= 0.6 + 0.4 * Math.abs(Math.sin(t * 2 + i * 0.09)); bins[i] = v < 0 ? 0 : v;
+    wave[i] = 0.4 * Math.sin(i / 128 * Math.PI * 6 + t * 4) * (0.5 + 0.5 * bass);
+  }
+  return { dt: dt * 1000, bass, mid, treble, energy, beat, bpm: 120, bins, wave };
+}
+function ensureScene() {
+  if (preview.scene && preview.scene.gl) return preview.scene;
+  const cv = $("pcanvas"); cv.width = cv.clientWidth || 320; cv.height = 180;
+  preview.scene = Synesthesia.GL.createScene(cv, 1);
+  return preview.scene;
+}
+// wrapper docs (a `visual` node) render themselves and may use a 2D context — give them their own
+// fresh canvas instead of the shared WebGL scene canvas (a canvas's context type is sticky).
+function freshWrapCanvas() {
+  if (preview.wrapCanvas) preview.wrapCanvas.remove();
+  const pc = $("pcanvas"), c = document.createElement("canvas");
+  c.style.cssText = "width:100%;height:180px;display:block;border-radius:8px;background:#000";
+  c.width = pc.clientWidth || 320; c.height = 180;
+  pc.parentNode.insertBefore(c, pc.nextSibling);
+  preview.wrapCanvas = c; return c;
+}
+function rebuildPreview() {
+  if (preview.raf) cancelAnimationFrame(preview.raf);
+  if (preview.spec && preview.spec.unmount) { try { preview.spec.unmount(); } catch (e) {} }
+  let spec;
+  try { spec = G.build(clone(doc)); } catch (e) { status("build error: " + e.message, "err"); preview.spec = null; return; }
+  spec.p = paramDefaults(spec);
+  const wrap = !!spec.wraps, pc = $("pcanvas");
+  try {
+    if (wrap) {                                    // hand-coded visual renders itself onto its own canvas
+      pc.style.display = "none"; const wc = freshWrapCanvas();
+      spec.mount({ canvas: wc, dpr: 1 });
+    } else {                                        // normal graph doc → the shared WebGL scene
+      pc.style.display = "block"; if (preview.wrapCanvas) preview.wrapCanvas.style.display = "none";
+      const scene = ensureScene(); if (!scene.gl) { status("WebGL2 unavailable", "err"); return; }
+      spec.mount({ canvas: scene.canvas, dpr: 1, scene: scene });
+    }
+  } catch (e) { status("mount error: " + e.message, "err"); return; }
+  preview.spec = spec;
+  let last = 0, t = 0;
+  const loop = ts => {
+    const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0.016; last = ts; t += dt;
+    try { spec.frame(synthAudio(t, dt)); } catch (e) { status("frame error: " + e.message, "err"); return; }
+    preview.raf = requestAnimationFrame(loop);
+  };
+  preview.raf = requestAnimationFrame(loop);
+}
+function scheduleRebuild() { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildPreview, 220); }
+
+/* ------------------------------ boot ------------------------------ */
+Object.keys(G.docs).forEach(id => $("docSel").appendChild(new Option(G.docs[id].label || id, id)));
+["value", "generator", "source", "force", "integrator", "geometry", "renderer", "output"].forEach(cat => {
+  const og = document.createElement("optgroup"); og.label = cat;
+  Object.keys(MAN).filter(t => MAN[t].cat === cat).sort().forEach(t => og.appendChild(new Option(t, t)));
+  if (og.children.length) $("addSel").appendChild(og);
+});
+$("docSel").addEventListener("change", e => loadDoc(e.target.value));
+$("revert").addEventListener("click", () => loadDoc($("docSel").value));
+$("addBtn").addEventListener("click", () => addNode($("addSel").value));
+$("save").addEventListener("click", () => {
+  const js = "Synesthesia.Graph.register(" + JSON.stringify(doc, null, 2) + ");\n";
+  const blob = new Blob([js], { type: "text/javascript" }), a = el("a");
+  a.href = URL.createObjectURL(blob); a.download = doc.id + ".js"; a.click(); URL.revokeObjectURL(a.href);
+  status("saved " + doc.id + ".js");
+});
+const first = Object.keys(G.docs)[0];
+if (first) { $("docSel").value = first; loadDoc(first); }
+else status("no documents found", "err");
+</script>
+</body>
+</html>

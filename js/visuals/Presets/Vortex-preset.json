@@ -1,0 +1,28 @@
+{
+  "visual": "vortex",
+  "label": "Vortex",
+  "params": {
+    "dot": 5,
+    "dropOpacity": 1.5,
+    "threshold": 0.35,
+    "edge": 0.6,
+    "sheen": 0.25,
+    "trail": 1,
+    "inflow": 0.7,
+    "curl": 0.3,
+    "turbAmp": 70,
+    "turbScale": 8,
+    "turbSpeed": 0.6,
+    "response": 1,
+    "lifespan": 12,
+    "maxParticles": 40000,
+    "burstPct": 0.03,
+    "minDrops": 400,
+    "beatGate": 0.06,
+    "density": 1.5,
+    "drop_h": 129,
+    "drop_s": 1,
+    "drop_v": 0.6,
+    "hueSpan": 180
+  }
+}
